@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>
+  (function() {
+    try {
+      var t = localStorage.getItem('farmwise_theme');
+      if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    } catch (e) {}
+  })();
+</script>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Dashboard — FarmWise AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="dashboard.css"/>
+</head>
+<body>
+
+<div class="shell">
+  <aside class="sidebar">
+    <a href="landing.html" class="logo">🌱 Farm<span>Wise</span></a>
+    <nav class="side-nav">
+      <a href="dashboard.html" class="side-link active">📊 Dashboard</a>
+      <a href="#" class="side-link">🐔 Animals</a>
+      <a href="#" class="side-link">🌾 Feed</a>
+      <a href="#" class="side-link">💰 Finance</a>
+      <a href="#" class="side-link">📦 Inventory</a>
+      <a href="#" class="side-link">✨ AI Assistant</a>
+    </nav>
+    <button class="theme-toggle" onclick="toggleLightMode()" id="themeBtn">🌙 Toggle theme</button>
+    <button class="logout-btn" id="logoutBtn">Log out</button>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <div class="farm-name" id="farmName">Loading…</div>
+        <div class="farm-sub" id="userGreeting"></div>
+      </div>
+      <div class="topbar-right">
+        <span class="badge" id="roleBadge"></span>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="empty-state">
+        <div class="empty-icon">🚧</div>
+        <h2>The dashboard is next up</h2>
+        <p>Auth, farm creation, and the backend for animals/feed/finance/inventory are live —
+           this screen is the seed for Phase 2: the executive dashboard, module screens, and
+           the AI assistant.</p>
+        <div class="stub-grid" id="stubGrid"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="dashboard.js"></script>
+</body>
+</html>
