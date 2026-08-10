@@ -18,7 +18,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 # ── sys.path setup ──────────────────────────────────────────────────────
@@ -29,6 +30,19 @@ if _BACKEND not in _sys.path:
 
 load_dotenv()
 
+# ── Static dir ───────────────────────────────────────────────────────────
+# Frontend lives alongside the backend now (backend/static/), same as
+# WaziBot — one Render Web Service, one URL, no separate Static Site to
+# misconfigure and no cross-origin CORS to keep in sync.
+_STATIC_CANDIDATES = [
+    _os.path.join(_BACKEND, "static"),
+    _os.path.join(_BACKEND, "..", "static"),
+]
+STATIC_DIR = next(
+    (_os.path.abspath(p) for p in _STATIC_CANDIDATES if _os.path.isdir(p)),
+    _os.path.abspath(_os.path.join(_BACKEND, "static")),
+)
+
 # ── Logging ──────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +50,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger("farmwise")
+log.info("📁 Static dir: %s", STATIC_DIR)
 
 from routes.auth_routes import router as auth_router
 from routes.farm_routes import router as farm_router
@@ -80,6 +95,48 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(SecurityHeadersMiddleware)
+
+
+# ── Frontend (served from the same app — no separate deployment) ─────────
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+def _html(name: str) -> FileResponse:
+    path = _os.path.join(STATIC_DIR, name)
+    if not _os.path.exists(path):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"{name} not found")
+    return FileResponse(path)
+
+
+@app.get("/", include_in_schema=False)
+def landing_page():
+    return _html("landing.html")
+
+
+@app.get("/login", include_in_schema=False)
+def login_page():
+    return _html("login.html")
+
+
+@app.get("/signup", include_in_schema=False)
+def signup_page():
+    return _html("signup.html")
+
+
+@app.get("/forgot-password", include_in_schema=False)
+def forgot_password_page():
+    return _html("forgot-password.html")
+
+
+@app.get("/reset-password", include_in_schema=False)
+def reset_password_page():
+    return _html("reset-password.html")
+
+
+@app.get("/dashboard", include_in_schema=False)
+def dashboard_page():
+    return _html("dashboard.html")
 
 
 # ── Exception handlers ──────────────────────────────────────────────────

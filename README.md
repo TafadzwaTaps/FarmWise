@@ -1,76 +1,38 @@
-# FarmWise AI — Web Frontend (Phase 1)
+# FarmWise AI
 
-Phase 1 of the web build: project scaffold, marketing landing page, and the
-auth screens (login, register, forgot password, reset password). This is
-static HTML/CSS/JS designed to sit in front of your existing FastAPI +
-Supabase backend — no backend code was touched or regenerated.
+A merged deployment: FastAPI backend + frontend served from one app, one
+Render service, matching WaziBot's approach — see `backend/README.md` for
+full details.
 
-## Structure
+## What changed from your last upload
 
-```
-frontend/
-├── index.html              Landing page (hero, features, benefits, pricing,
-│                            testimonials, FAQ, contact, CTA, footer)
-├── assets/
-│   ├── css/
-│   │   ├── main.css         Design tokens + landing page styles
-│   │   └── auth.css         Auth screen layout (split brand/form panel)
-│   ├── js/
-│   │   ├── config.js         API_BASE_URL — point this at your Render backend
-│   │   ├── auth.js            Auth API client (register/login/forgot/reset/
-│   │   │                      refresh/logout), token storage, remember-me
-│   │   └── main.js            Landing page interactions (nav, FAQ, scroll reveal)
-│   └── images/
-├── pages/
-│   ├── login.html
-│   ├── register.html
-│   ├── forgot-password.html
-│   └── reset-password.html
-├── partials/                (reserved — shared header/sidebar for dashboard, Phase 2)
-└── dashboard/                (empty — Phase 2)
-```
+Your frontend was previously deployed as a separate Render Static Site,
+which is where the "not found" / blank-page issues came from (wrong URL,
+missing `index.html`, and `CORS_ORIGINS` needing to track a second URL).
 
-## Design
+This version merges them:
 
-Agricultural palette without the generic cream+terracotta AI look: deep
-canopy green, warm maize gold, soil brown, pasture green, warm parchment
-background. Fraunces for display type, Inter for body/UI, JetBrains Mono for
-stat/data readouts. Signature motif: a "furrow" divider (angled parallel
-lines, like plowed rows) used between sections instead of a plain rule.
+- `frontend/` is gone — its files now live in `backend/static/`
+- `backend/main.py` mounts `static/` and serves each page at a clean URL
+  (`/`, `/login`, `/signup`, `/forgot-password`, `/reset-password`,
+  `/dashboard`) via `FileResponse`, the same pattern WaziBot's `main.py` uses
+- Every internal link and JS redirect was rewritten from relative filenames
+  (`login.html`) to absolute clean paths (`/login`)
+- Every page's `const API` now points at `/api/v1` (same-origin) instead of
+  branching on hostname to guess a cross-origin backend URL
 
-## What `auth.js` expects from the backend
+**Deploy just the one Render Web Service now** (Root Directory: `backend`).
+If you still have the separate Static Site from before, it's no longer
+needed — you can delete it once this is live.
 
-Update `assets/js/config.js` with your real Render URL. The client calls:
+## Verified before packaging
 
-| Endpoint                     | Method | Body                              |
-|-------------------------------|--------|-----------------------------------|
-| `/auth/register`              | POST   | `full_name, email, password, farm_name, role` |
-| `/auth/login`                 | POST   | `email, password` → `access_token, refresh_token, user` |
-| `/auth/forgot-password`       | POST   | `email`                           |
-| `/auth/reset-password`        | POST   | `token, new_password`             |
-| `/auth/refresh`               | POST   | `refresh_token`                   |
-| `/auth/logout`                | POST   | (Bearer token)                    |
-
-If your existing backend's routes or field names differ, adjust `auth.js`
-rather than the backend — it's a thin client.
-
-"Remember me" stores tokens in `localStorage`; unchecked, it uses
-`sessionStorage` (cleared when the tab closes).
-
-## Next steps (not built yet)
-
-- `dashboard/` shell + sidebar/topbar partial, wired to a real JWT session
-- Executive dashboard (animals, stock, income, expenses, profit, charts)
-- Farm / animal / feed / sales / expense / inventory module screens
-- AI assistant chat UI
-- Reports & analytics screens with PDF/Excel/CSV export
-
-## Running locally
-
-No build step — open `frontend/index.html` directly, or serve the folder
-with any static server, e.g.:
-
-```
-cd frontend
-python3 -m http.server 5500
-```
+- `main.py` compiles cleanly
+- All 6 HTML pages still have balanced tags after the link rewrite
+- All inline/external JS passes `node --check`
+- Full integration test (FastAPI `TestClient`, fake Supabase backend):
+  every page route (`/`, `/login`, `/signup`, `/forgot-password`,
+  `/reset-password`, `/dashboard`) returns 200 with the expected content,
+  `/static/dashboard.css` and `/static/dashboard.js` serve correctly,
+  and the full API flow (signup → login → `/auth/me` → create farm) still
+  works — all on one origin, no CORS involved

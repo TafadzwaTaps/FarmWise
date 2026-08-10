@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>
+  (function() {
+    try {
+      var t = localStorage.getItem('farmwise_theme');
+      if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    } catch (e) {}
+  })();
+</script>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Log in — FarmWise AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<style>
+  :root{
+    --bg:#0a1a10;--surface:#0f2417;--surface2:#153420;
+    --border:#1f4a2c;--green:#39e75f;--green-dim:#22c55e;
+    --green-glow:rgba(57,231,95,0.18);--mango:#ff8a00;--mango-dim:#e67300;
+    --mango-glow:rgba(255,138,0,0.20);--red:#ff4d4d;
+    --text:#eafbef;--text-dim:#7fae8c;
+    --mono:'Space Mono',monospace;--sans:'Space Grotesk',sans-serif;
+  }
+  html[data-theme="light"]{
+    --bg:#fbfdf8;--surface:#ffffff;--surface2:#eef8f0;--border:#d8ead9;
+    --green:#16a34a;--green-dim:#15803d;--green-glow:rgba(22,163,74,0.14);
+    --mango:#e07a00;--mango-dim:#b8630a;--mango-glow:rgba(224,122,0,0.14);
+    --red:#dc2626;--text:#0f2417;--text-dim:#4d6b57;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;display:flex;}
+
+  .left{width:400px;min-height:100vh;background:var(--surface);border-right:1px solid var(--border);
+    display:flex;flex-direction:column;padding:48px 40px;position:sticky;top:0;height:100vh;overflow-y:auto;}
+  .logo{font-size:22px;font-weight:800;margin-bottom:4px;}
+  .logo span{color:var(--green);}
+  .tagline{font-size:12px;color:var(--text-dim);font-family:var(--mono);margin-bottom:48px;}
+  .feature-list{display:flex;flex-direction:column;gap:22px;flex:1;}
+  .feature{display:flex;align-items:flex-start;gap:14px;}
+  .feature-icon{font-size:20px;width:32px;flex-shrink:0;margin-top:2px;}
+  .feature-title{font-size:14px;font-weight:700;margin-bottom:3px;}
+  .feature-desc{font-size:12px;color:var(--text-dim);font-family:var(--mono);line-height:1.5;}
+  .left-footer{margin-top:auto;padding-top:24px;border-top:1px solid var(--border);
+    font-size:12px;font-family:var(--mono);color:var(--text-dim);}
+  .left-footer a{color:var(--green);text-decoration:none;font-weight:700;}
+
+  .right{flex:1;display:flex;align-items:center;justify-content:center;padding:48px 40px;position:relative;}
+  .theme-toggle{position:absolute;top:24px;right:24px;background:var(--surface2);border:1px solid var(--border);
+    color:var(--text);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;}
+  .form-card{width:100%;max-width:420px;}
+  .form-card h1{font-size:26px;margin-bottom:6px;}
+  .form-card .sub{font-size:14px;color:var(--text-dim);margin-bottom:30px;}
+
+  .field{margin-bottom:16px;}
+  .field label{display:block;font-size:13px;font-weight:700;margin-bottom:6px;}
+  .field input{width:100%;padding:12px 14px;border-radius:9px;border:1.5px solid var(--border);
+    background:var(--surface2);color:var(--text);font-family:var(--sans);font-size:14px;}
+  .field input:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-glow);}
+
+  .row{display:flex;justify-content:space-between;align-items:center;font-size:13px;margin:6px 0 22px;}
+  .row a{color:var(--green);font-weight:700;}
+  .check-row{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);}
+  .check-row input{width:15px;height:15px;}
+
+  .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
+    font-family:var(--sans);font-weight:700;font-size:14px;padding:13px 26px;border-radius:10px;
+    border:none;cursor:pointer;background:var(--mango);color:#1a0e00;transition:background .15s, transform .15s;}
+  .btn:hover{background:var(--mango-dim);}
+  .btn:active{transform:translateY(1px);}
+  .btn:disabled{opacity:.6;cursor:default;}
+
+  .foot{text-align:center;font-size:14px;color:var(--text-dim);margin-top:24px;}
+  .foot a{color:var(--text);font-weight:700;}
+
+  .alert{border-radius:9px;padding:12px 14px;font-size:13px;margin-bottom:16px;display:none;}
+  .alert--error{background:rgba(255,77,77,0.12);color:var(--red);border:1px solid rgba(255,77,77,0.3);}
+  .alert--success{background:var(--green-glow);color:var(--green);border:1px solid var(--border);}
+  .alert.show{display:block;}
+
+  @media (max-width:900px){ .left{display:none;} }
+</style>
+</head>
+<body>
+
+<div class="left">
+  <div>
+    <a href="/" class="logo">🌱 Farm<span>Wise</span> AI</a>
+    <div class="tagline">SMART FARM MANAGEMENT</div>
+  </div>
+  <div class="feature-list">
+    <div class="feature"><span class="feature-icon">📊</span><div><div class="feature-title">Automatic profit tracking</div><div class="feature-desc">Every sale and expense adds up in real time.</div></div></div>
+    <div class="feature"><span class="feature-icon">🐔</span><div><div class="feature-title">Multi-farm, multi-role</div><div class="feature-desc">Owners, managers, workers, accountants — one account.</div></div></div>
+    <div class="feature"><span class="feature-icon">✨</span><div><div class="feature-title">AI farm assistant</div><div class="feature-desc">Ask questions about your own farm data, anytime.</div></div></div>
+  </div>
+  <div class="left-footer">New to FarmWise? <a href="/signup">Start a free trial →</a></div>
+</div>
+
+<div class="right">
+  <button class="theme-toggle" onclick="toggleLightMode()" aria-label="Toggle light/dark mode" id="themeBtn">🌙</button>
+  <div class="form-card">
+    <span style="font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--green);font-weight:700">Welcome back</span>
+    <h1>Log in to your farm</h1>
+    <p class="sub">Pick up right where you left off.</p>
+
+    <div class="alert alert--success" id="infoAlert"></div>
+    <div class="alert alert--error" id="formAlert"></div>
+
+    <form id="loginForm">
+      <div class="field">
+        <label for="identifier">Email or phone number</label>
+        <input id="identifier" type="text" required autocomplete="username">
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" type="password" required autocomplete="current-password" minlength="8">
+      </div>
+      <div class="row">
+        <label class="check-row"><input type="checkbox" id="remember" checked> Remember me</label>
+        <a href="/forgot-password">Forgot password?</a>
+      </div>
+      <button type="submit" class="btn" id="loginBtn">Log in</button>
+    </form>
+
+    <p class="foot">Don't have an account? <a href="/signup">Start free trial</a></p>
+  </div>
+</div>
+
+<script>
+function toggleLightMode() {
+  const html = document.documentElement;
+  const isLight = html.getAttribute('data-theme') === 'light';
+  const btn = document.getElementById('themeBtn');
+  if (isLight) { html.removeAttribute('data-theme'); try { localStorage.setItem('farmwise_theme','dark'); } catch(e){} btn.textContent='🌙'; }
+  else { html.setAttribute('data-theme','light'); try { localStorage.setItem('farmwise_theme','light'); } catch(e){} btn.textContent='☀️'; }
+}
+(function() {
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  document.getElementById('themeBtn').textContent = isLight ? '☀️' : '🌙';
+})();
+
+// Point this at your Render-deployed FastAPI backend.
+// Same-origin — the frontend is served by this FastAPI app, so no host/CORS juggling.
+const API = '/api/v1';
+
+const form = document.getElementById('loginForm');
+const alertBox = document.getElementById('formAlert');
+const infoBox = document.getElementById('infoAlert');
+const submitBtn = document.getElementById('loginBtn');
+
+function showAlert(msg) { alertBox.textContent = msg; alertBox.classList.add('show'); }
+
+const params = new URLSearchParams(location.search);
+if (params.get('registered') === '1') { infoBox.textContent = 'Account created. Log in to set up your farm.'; infoBox.classList.add('show'); }
+if (params.get('reset') === '1') { infoBox.textContent = 'Password reset. Log in with your new password.'; infoBox.classList.add('show'); }
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  alertBox.classList.remove('show');
+
+  const identifier = document.getElementById('identifier').value.trim();
+  const password = document.getElementById('password').value;
+  const remember = document.getElementById('remember').checked;
+
+  submitBtn.disabled = true; submitBtn.textContent = 'Logging in...';
+
+  try {
+    const res = await fetch(API + '/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier, password, remember_me: remember, device_label: navigator.userAgent.slice(0, 60) }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error((data.error && data.error.message) || 'Could not log in.');
+
+    const store = remember ? localStorage : sessionStorage;
+    store.setItem('farmwise_token', data.access_token);
+    store.setItem('farmwise_refresh', data.refresh_token);
+
+    const meRes = await fetch(API + '/auth/me', { headers: { 'Authorization': 'Bearer ' + data.access_token } });
+    const me = await meRes.json();
+    store.setItem('farmwise_user', JSON.stringify(me));
+
+    window.location.href = '/dashboard';
+  } catch (err) {
+    showAlert(err.message || 'Could not log in. Check your details and try again.');
+    submitBtn.disabled = false; submitBtn.textContent = 'Log in';
+  }
+});
+</script>
+</body>
+</html>

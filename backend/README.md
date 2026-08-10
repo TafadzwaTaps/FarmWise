@@ -1,9 +1,46 @@
-# FarmWise AI — Backend (WaziBot-style rewrite)
+# FarmWise AI — Backend + Frontend (WaziBot-style, single deployment)
 
 This backend has been restructured to match the [[wazibot]] backend's
 structure and coding style: synchronous route handlers, a `crud/` layer
 that talks to Supabase directly via `supabase-py` (no ORM), no Alembic,
 and the same `core/` / `routes/` / `services/` folder layout.
+
+**The frontend now lives inside this backend, at `static/`, and is served
+by this same FastAPI app** — again matching WaziBot, which mounts
+`StaticFiles` at `/static` and registers explicit page routes
+(`@app.get("/")`, `@app.get("/dashboard")`, etc.) rather than deploying the
+frontend as a separate site. This is a deliberate fix: a separately
+deployed static site needs its own Render service, its own URL, a correct
+Publish Directory, an `index.html` fallback, and `CORS_ORIGINS` kept in
+sync with wherever it ends up — every one of those was a real point of
+failure that came up while getting this deployed. One app, one URL, one
+Render service removes all of it.
+
+### Page routes (clean URLs, served from `static/`)
+
+```
+GET /                  → static/landing.html
+GET /login             → static/login.html
+GET /signup            → static/signup.html
+GET /forgot-password    → static/forgot-password.html
+GET /reset-password      → static/reset-password.html
+GET /dashboard             → static/dashboard.html
+GET /static/<file>            → any file in static/ directly (css, js, or the html files themselves)
+```
+
+Every internal link and `window.location.href` redirect in the frontend
+now points at these clean paths (e.g. `/login`, `/dashboard`) instead of
+relative filenames (`login.html`) — relative filenames break the moment
+a page isn't served from the directory root, which clean routes sidestep
+entirely. The one exception is `dashboard.html`'s own `<link>`/`<script>`
+tags, which point at `/static/dashboard.css` and `/static/dashboard.js`
+directly, same as WaziBot's `dashboard.html` does.
+
+### API base URL
+
+Every page's inline script now sets `const API = '/api/v1';` — a relative,
+same-origin path. No hostname branching, no CORS headers required for the
+frontend to talk to the API, because they're no longer different origins.
 
 ## What changed from the previous version
 
@@ -28,7 +65,8 @@ since that's a real security feature worth keeping.
 ## Structure
 
 ```
-main.py                 # bootstrap: CORS, security headers, exception handlers, routers
+main.py                 # bootstrap: static mount + page routes, CORS, security headers, exception handlers, API routers
+static/                  # the entire frontend — landing/login/signup/forgot-password/reset-password/dashboard + dashboard.css/.js
 core/
   db.py                  # Supabase client singleton (with startup validation)
   auth.py                 # password hashing, JWT, get_current_user, require_farm_role
@@ -80,15 +118,29 @@ Project Settings → API, and set `SUPABASE_URL` / `SUPABASE_KEY` in `.env`.
 
 ```bash
 uvicorn main:app --reload
+# → http://localhost:8000            (the app itself — landing page)
+# → http://localhost:8000/dashboard
 # → http://localhost:8000/docs
 ```
 
+One process now serves everything — no second `python -m http.server` for
+the frontend needed.
+
 ### Deploying
 
-Same as before: Render, with `SUPABASE_URL`, `SUPABASE_KEY`, `SECRET_KEY`,
-and `CORS_ORIGINS` set in the environment. No `Dockerfile` or `render.yaml`
-changes are needed beyond removing any Alembic migration step from the
-build/start command, since there isn't one anymore.
+**One Render Web Service. No Static Site.** If you previously created a
+separate Static Site for the frontend, you can delete it — it's no longer
+used.
+
+- Root Directory: `backend`
+- Build Command: `pip install -r requirements.txt`
+- Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+- Environment: `SUPABASE_URL`, `SUPABASE_KEY`, `SECRET_KEY` — `CORS_ORIGINS`
+  can stay empty unless something other than this app's own frontend calls
+  the API cross-origin.
+
+After deploying, your Render URL *is* the app — `https://your-service.onrender.com/`
+loads the landing page directly, no separate frontend URL to keep straight.
 
 ## Endpoints (unchanged paths)
 

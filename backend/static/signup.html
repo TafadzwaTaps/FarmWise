@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>
+  (function() {
+    try {
+      var t = localStorage.getItem('farmwise_theme');
+      if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    } catch (e) {}
+  })();
+</script>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Start free trial — FarmWise AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<style>
+  :root{
+    --bg:#0a1a10;--surface:#0f2417;--surface2:#153420;
+    --border:#1f4a2c;--green:#39e75f;--green-dim:#22c55e;
+    --green-glow:rgba(57,231,95,0.18);--mango:#ff8a00;--mango-dim:#e67300;
+    --mango-glow:rgba(255,138,0,0.20);--red:#ff4d4d;
+    --text:#eafbef;--text-dim:#7fae8c;
+    --mono:'Space Mono',monospace;--sans:'Space Grotesk',sans-serif;
+  }
+  html[data-theme="light"]{
+    --bg:#fbfdf8;--surface:#ffffff;--surface2:#eef8f0;--border:#d8ead9;
+    --green:#16a34a;--green-dim:#15803d;--green-glow:rgba(22,163,74,0.14);
+    --mango:#e07a00;--mango-dim:#b8630a;--mango-glow:rgba(224,122,0,0.14);
+    --red:#dc2626;--text:#0f2417;--text-dim:#4d6b57;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;display:flex;}
+
+  .left{width:400px;min-height:100vh;background:var(--surface);border-right:1px solid var(--border);
+    display:flex;flex-direction:column;padding:48px 40px;position:sticky;top:0;height:100vh;overflow-y:auto;}
+  .logo{font-size:22px;font-weight:800;margin-bottom:4px;}
+  .logo span{color:var(--green);}
+  .tagline{font-size:12px;color:var(--text-dim);font-family:var(--mono);margin-bottom:48px;}
+  .feature-list{display:flex;flex-direction:column;gap:22px;flex:1;}
+  .feature{display:flex;align-items:flex-start;gap:14px;}
+  .feature-icon{font-size:20px;width:32px;flex-shrink:0;margin-top:2px;}
+  .feature-title{font-size:14px;font-weight:700;margin-bottom:3px;}
+  .feature-desc{font-size:12px;color:var(--text-dim);font-family:var(--mono);line-height:1.5;}
+  .left-footer{margin-top:auto;padding-top:24px;border-top:1px solid var(--border);
+    font-size:12px;font-family:var(--mono);color:var(--text-dim);}
+  .left-footer a{color:var(--green);text-decoration:none;font-weight:700;}
+
+  .right{flex:1;display:flex;align-items:center;justify-content:center;padding:48px 40px;position:relative;overflow-y:auto;}
+  .theme-toggle{position:absolute;top:24px;right:24px;background:var(--surface2);border:1px solid var(--border);
+    color:var(--text);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;}
+  .form-card{width:100%;max-width:440px;padding:24px 0;}
+  .form-card h1{font-size:26px;margin-bottom:6px;}
+  .form-card .sub{font-size:14px;color:var(--text-dim);margin-bottom:26px;}
+
+  .field{margin-bottom:16px;}
+  .field label{display:block;font-size:13px;font-weight:700;margin-bottom:6px;}
+  .field label .opt{font-weight:400;color:var(--text-dim);}
+  .field input,.field select{width:100%;padding:12px 14px;border-radius:9px;border:1.5px solid var(--border);
+    background:var(--surface2);color:var(--text);font-family:var(--sans);font-size:14px;}
+  .field input:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-glow);}
+
+  .check-row{display:flex;align-items:flex-start;gap:8px;font-size:13px;color:var(--text-dim);margin-bottom:20px;}
+  .check-row input{width:15px;height:15px;margin-top:2px;}
+
+  .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
+    font-family:var(--sans);font-weight:700;font-size:14px;padding:13px 26px;border-radius:10px;
+    border:none;cursor:pointer;background:var(--mango);color:#1a0e00;transition:background .15s, transform .15s;}
+  .btn:hover{background:var(--mango-dim);}
+  .btn:active{transform:translateY(1px);}
+  .btn:disabled{opacity:.6;cursor:default;}
+
+  .foot{text-align:center;font-size:14px;color:var(--text-dim);margin-top:22px;}
+  .foot a{color:var(--text);font-weight:700;}
+
+  .alert{border-radius:9px;padding:12px 14px;font-size:13px;margin-bottom:16px;display:none;}
+  .alert--error{background:rgba(255,77,77,0.12);color:var(--red);border:1px solid rgba(255,77,77,0.3);}
+  .alert.show{display:block;}
+
+  @media (max-width:900px){ .left{display:none;} }
+</style>
+</head>
+<body>
+
+<div class="left">
+  <div>
+    <a href="/" class="logo">🌱 Farm<span>Wise</span> AI</a>
+    <div class="tagline">FREE 14-DAY TRIAL</div>
+  </div>
+  <div class="feature-list">
+    <div class="feature"><span class="feature-icon">🚫💳</span><div><div class="feature-title">No credit card required</div><div class="feature-desc">Start tracking your farm in under five minutes.</div></div></div>
+    <div class="feature"><span class="feature-icon">🏡</span><div><div class="feature-title">You own the first farm you create</div><div class="feature-desc">Invite workers and managers once you're set up.</div></div></div>
+    <div class="feature"><span class="feature-icon">📱</span><div><div class="feature-title">Works on phone or desktop</div><div class="feature-desc">Log feed and sales from wherever you are.</div></div></div>
+  </div>
+  <div class="left-footer">Already have an account? <a href="/login">Log in →</a></div>
+</div>
+
+<div class="right">
+  <button class="theme-toggle" onclick="toggleLightMode()" aria-label="Toggle light/dark mode" id="themeBtn">🌙</button>
+  <div class="form-card">
+    <span style="font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--green);font-weight:700">Get started free</span>
+    <h1>Create your account</h1>
+    <p class="sub">No credit card required. You'll own the first farm you create.</p>
+
+    <div class="alert alert--error" id="formAlert"></div>
+
+    <form id="registerForm">
+      <div class="field"><label for="fullName">Full name</label><input id="fullName" type="text" required autocomplete="name"></div>
+      <div class="field"><label for="email">Email</label><input id="email" type="email" required autocomplete="email"></div>
+      <div class="field"><label for="phoneNumber">Phone number <span class="opt">(optional)</span></label><input id="phoneNumber" type="tel" autocomplete="tel"></div>
+      <div class="field"><label for="farmName">Farm name</label><input id="farmName" type="text" required placeholder="e.g. Green Valley Farm"></div>
+      <div class="field"><label for="password">Password</label><input id="password" type="password" required minlength="8" autocomplete="new-password"></div>
+      <div class="field"><label for="confirmPassword">Confirm password</label><input id="confirmPassword" type="password" required minlength="8" autocomplete="new-password"></div>
+      <label class="check-row"><input type="checkbox" id="terms" required> I agree to the Terms of Service and Privacy Policy</label>
+      <button type="submit" class="btn" id="registerBtn">Create account</button>
+    </form>
+
+    <p class="foot">Already have an account? <a href="/login">Log in</a></p>
+  </div>
+</div>
+
+<script>
+function toggleLightMode() {
+  const html = document.documentElement;
+  const isLight = html.getAttribute('data-theme') === 'light';
+  const btn = document.getElementById('themeBtn');
+  if (isLight) { html.removeAttribute('data-theme'); try { localStorage.setItem('farmwise_theme','dark'); } catch(e){} btn.textContent='🌙'; }
+  else { html.setAttribute('data-theme','light'); try { localStorage.setItem('farmwise_theme','light'); } catch(e){} btn.textContent='☀️'; }
+}
+(function() {
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  document.getElementById('themeBtn').textContent = isLight ? '☀️' : '🌙';
+})();
+
+// Same-origin — the frontend is served by this FastAPI app, so no host/CORS juggling.
+const API = '/api/v1';
+
+const form = document.getElementById('registerForm');
+const alertBox = document.getElementById('formAlert');
+const submitBtn = document.getElementById('registerBtn');
+
+function showAlert(msg) { alertBox.textContent = msg; alertBox.classList.add('show'); }
+
+async function api(path, body, token) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(API + path, { method: 'POST', headers, body: body ? JSON.stringify(body) : undefined });
+  let data = null; try { data = await res.json(); } catch (e) {}
+  if (!res.ok) throw new Error((data && data.error && data.error.message) || 'Request failed');
+  return data;
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  alertBox.classList.remove('show');
+
+  const fullName = document.getElementById('fullName').value.trim();
+  const email = document.getElementById('email').value.trim();
+  const phoneNumber = document.getElementById('phoneNumber').value.trim();
+  const farmName = document.getElementById('farmName').value.trim();
+  const password = document.getElementById('password').value;
+  const confirmPassword = document.getElementById('confirmPassword').value;
+
+  if (password !== confirmPassword) { showAlert("Passwords don't match."); return; }
+  if (!document.getElementById('terms').checked) { showAlert('Please agree to the Terms of Service to continue.'); return; }
+
+  submitBtn.disabled = true;
+  try {
+    submitBtn.textContent = 'Creating account...';
+    await api('/auth/signup', { full_name: fullName, email, phone_number: phoneNumber || null, password });
+
+    submitBtn.textContent = 'Logging in...';
+    const tokens = await api('/auth/login', { identifier: email, password, remember_me: true });
+    localStorage.setItem('farmwise_token', tokens.access_token);
+    localStorage.setItem('farmwise_refresh', tokens.refresh_token);
+
+    submitBtn.textContent = 'Setting up your farm...';
+    await api('/farms', { name: farmName, currency: 'USD' }, tokens.access_token);
+
+    const meRes = await fetch(API + '/auth/me', { headers: { 'Authorization': 'Bearer ' + tokens.access_token } });
+    localStorage.setItem('farmwise_user', JSON.stringify(await meRes.json()));
+
+    window.location.href = '/dashboard';
+  } catch (err) {
+    showAlert(err.message || 'Could not create your account. Please try again.');
+    submitBtn.disabled = false; submitBtn.textContent = 'Create account';
+  }
+});
+</script>
+</body>
+</html>
