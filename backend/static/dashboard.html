@@ -22,11 +22,13 @@
     <a href="/" class="logo">🌱 Farm<span>Wise</span></a>
     <nav class="side-nav">
       <a href="/dashboard" class="side-link active">📊 Dashboard</a>
-      <a href="#" class="side-link">🐔 Animals</a>
-      <a href="#" class="side-link">🌾 Feed</a>
-      <a href="#" class="side-link">💰 Finance</a>
-      <a href="#" class="side-link">📦 Inventory</a>
+      <a href="/animals" class="side-link">🐔 Animals</a>
+      <a href="/feed" class="side-link">🌾 Feed</a>
+      <a href="/finance" class="side-link">💰 Finance</a>
+      <a href="/inventory" class="side-link">📦 Inventory</a>
+      <a href="/workers" class="side-link">👷 Workers</a>
       <a href="#" class="side-link">✨ AI Assistant</a>
+      <a href="/settings" class="side-link">⚙️ Settings</a>
     </nav>
     <button class="theme-toggle" onclick="toggleLightMode()" id="themeBtn">🌙 Toggle theme</button>
     <button class="logout-btn" id="logoutBtn">Log out</button>
@@ -34,27 +36,93 @@
 
   <main class="main">
     <header class="topbar">
-      <div>
-        <div class="farm-name" id="farmName">Loading…</div>
-        <div class="farm-sub" id="userGreeting"></div>
+      <div style="display:flex;align-items:center;gap:14px">
+        <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">☰</button>
+        <div>
+          <div class="farm-name" id="farmName">Loading…</div>
+          <div class="farm-sub" id="userGreeting"></div>
+        </div>
       </div>
       <div class="topbar-right">
         <span class="badge" id="roleBadge"></span>
       </div>
     </header>
 
-    <div class="content">
+    <div class="content" id="dashboardContent" style="display:none">
+
+      <div class="alert-banner" id="lowStockBanner" style="display:none">
+        <span class="alert-banner-icon">⚠️</span>
+        <span id="lowStockText"></span>
+        <a href="#" class="alert-banner-link">View inventory →</a>
+      </div>
+
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">Current Animals</div>
+          <div class="stat-value" id="statAnimals">—</div>
+          <div class="stat-sub" id="statBatches"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Feed Remaining</div>
+          <div class="stat-value" id="statFeed">—</div>
+          <div class="stat-sub">kg on hand</div>
+        </div>
+        <div class="stat-card stat-card--income">
+          <div class="stat-label">Income (30d)</div>
+          <div class="stat-value" id="statIncome">—</div>
+          <div class="stat-sub" id="statSalesRevenue"></div>
+        </div>
+        <div class="stat-card stat-card--expense">
+          <div class="stat-label">Expenses (30d)</div>
+          <div class="stat-value" id="statExpenses">—</div>
+        </div>
+        <div class="stat-card" id="profitCard">
+          <div class="stat-label">Net Profit (30d)</div>
+          <div class="stat-value" id="statProfit">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Mortality Rate</div>
+          <div class="stat-value" id="statMortality">—</div>
+          <div class="stat-sub" id="statDeaths"></div>
+        </div>
+      </div>
+
+      <div class="panel-grid">
+        <div class="panel">
+          <h3 class="panel-title">Expenses by category</h3>
+          <div class="bar-chart" id="expenseChart">
+            <p class="panel-empty">No expenses logged in the last 30 days.</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3 class="panel-title">Upcoming vaccinations</h3>
+          <div class="list" id="vaccinationList">
+            <p class="panel-empty">Nothing due in the next 14 days.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 class="panel-title">Recent activity</h3>
+        <div class="activity-list" id="activityList">
+          <p class="panel-empty">No activity yet — log a sale, expense, or mortality record to see it here.</p>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="content" id="noFarmState" style="display:none">
       <div class="empty-state">
-        <div class="empty-icon">🚧</div>
-        <h2>The dashboard is next up</h2>
-        <p>Auth, farm creation, and the backend for animals/feed/finance/inventory are live —
-           this screen is the seed for Phase 2: the executive dashboard, module screens, and
-           the AI assistant.</p>
-        <div class="stub-grid" id="stubGrid"></div>
+        <div class="empty-icon">🌱</div>
+        <h2>No farm yet</h2>
+        <p>You'll need a farm before the dashboard has anything to show. This shouldn't normally
+           happen — farms are created automatically during signup.</p>
       </div>
     </div>
   </main>
 </div>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
 
 <script src="/static/dashboard.js"></script>
 </body>

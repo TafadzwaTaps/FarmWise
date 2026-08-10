@@ -3,6 +3,7 @@ Routes: /farms/{farm_id}/sales, .../expenses, .../income, .../finance-summary
 """
 
 from datetime import date
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -15,12 +16,17 @@ router = APIRouter(prefix="/farms/{farm_id}", tags=["Finance"])
 _RECORD_ROLES = ("farmer", "farm_manager", "worker")
 _FINANCE_VIEW_ROLES = ("farmer", "farm_manager", "accountant")
 
-PAYMENT_METHODS = {"cash", "ecocash", "onemoney", "bank_transfer", "card", "other"}
-EXPENSE_CATEGORIES = {
+PaymentMethod = Literal["cash", "ecocash", "onemoney", "bank_transfer", "card", "other"]
+ExpenseCategory = Literal[
     "feed", "transport", "electricity", "workers", "fuel", "equipment",
     "maintenance", "veterinary", "utilities", "other",
-}
-INCOME_CATEGORIES = {"animal_sales", "egg_sales", "milk_sales", "manure", "breeding", "other"}
+]
+IncomeCategory = Literal["animal_sales", "egg_sales", "milk_sales", "manure", "breeding", "other"]
+
+# Kept for anything that still wants the plain set (e.g. tests, docs).
+PAYMENT_METHODS = set(PaymentMethod.__args__)
+EXPENSE_CATEGORIES = set(ExpenseCategory.__args__)
+INCOME_CATEGORIES = set(IncomeCategory.__args__)
 
 
 class SaleCreate(BaseModel):
@@ -29,13 +35,13 @@ class SaleCreate(BaseModel):
     quantity: int = Field(gt=0)
     unit_price: float = Field(ge=0)
     discount: float = Field(default=0, ge=0)
-    payment_method: str = "cash"
+    payment_method: PaymentMethod = "cash"
     sale_date: date
     notes: str | None = None
 
 
 class ExpenseCreate(BaseModel):
-    category: str
+    category: ExpenseCategory
     amount: float = Field(gt=0)
     expense_date: date
     vendor: str | None = None
@@ -43,7 +49,7 @@ class ExpenseCreate(BaseModel):
 
 
 class IncomeCreate(BaseModel):
-    category: str
+    category: IncomeCategory
     amount: float = Field(gt=0)
     income_date: date
     notes: str | None = None

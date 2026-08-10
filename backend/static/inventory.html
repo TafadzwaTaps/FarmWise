@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>
+  (function() {
+    try {
+      var t = localStorage.getItem('farmwise_theme');
+      if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    } catch (e) {}
+  })();
+</script>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Inventory — FarmWise AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/static/inventory.css"/>
+</head>
+<body>
+
+<div class="shell">
+  <aside class="sidebar">
+    <a href="/" class="logo">🌱 Farm<span>Wise</span></a>
+    <nav class="side-nav">
+      <a href="/dashboard" class="side-link">📊 Dashboard</a>
+      <a href="/animals" class="side-link">🐔 Animals</a>
+      <a href="/feed" class="side-link">🌾 Feed</a>
+      <a href="/finance" class="side-link">💰 Finance</a>
+      <a href="/inventory" class="side-link active">📦 Inventory</a>
+      <a href="/workers" class="side-link">👷 Workers</a>
+      <a href="#" class="side-link">✨ AI Assistant</a>
+      <a href="/settings" class="side-link">⚙️ Settings</a>
+    </nav>
+    <button class="theme-toggle" onclick="toggleLightMode()" id="themeBtn">🌙 Toggle theme</button>
+    <button class="logout-btn" id="logoutBtn">Log out</button>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:14px">
+        <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">☰</button>
+        <div>
+          <div class="farm-name" id="farmName">Loading…</div>
+          <div class="farm-sub" id="userGreeting"></div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <span class="badge" id="roleBadge"></span>
+      </div>
+    </header>
+
+    <div class="content" id="pageContent" style="display:none">
+      <div class="toolbar">
+        <h1>Inventory</h1>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <div class="entity-tabs" id="filterTabs">
+            <span class="entity-tab active" data-filter="">All</span>
+            <span class="entity-tab" data-filter="low">Low stock</span>
+          </div>
+          <button class="btn btn--primary" id="newItemBtn">+ New item</button>
+        </div>
+      </div>
+
+      <div class="inv-grid" id="invGrid"></div>
+
+      <div class="empty-state" id="emptyState" style="display:none">
+        <div class="empty-icon">📦</div>
+        <h2>No inventory items yet</h2>
+        <p>Track feed, medicine, equipment, tools, and packaging stock levels here.</p>
+        <button class="btn btn--primary" id="emptyNewItemBtn">+ New item</button>
+      </div>
+    </div>
+
+    <div class="content" id="noFarmState" style="display:none">
+      <div class="empty-state">
+        <div class="empty-icon">🌱</div>
+        <h2>No farm yet</h2>
+        <p>You'll need a farm before you can track inventory.</p>
+      </div>
+    </div>
+  </main>
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<!-- ═══════ New item modal ═══════ -->
+<div class="modal-overlay" id="createModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>New inventory item</h2>
+      <button class="modal-close" data-close="createModal">✕</button>
+    </div>
+    <div class="alert alert--error" id="createAlert"></div>
+    <form id="createForm">
+      <div class="field-row">
+        <div class="field"><label for="itemCategory">Category</label>
+          <select id="itemCategory" required>
+            <option value="feed">Feed</option>
+            <option value="medicine">Medicine</option>
+            <option value="equipment">Equipment</option>
+            <option value="tools">Tools</option>
+            <option value="packaging">Packaging</option>
+          </select>
+        </div>
+        <div class="field"><label for="itemUnit">Unit</label><input id="itemUnit" required placeholder="e.g. kg, vial, bag"></div>
+      </div>
+      <div class="field"><label for="itemName">Name</label><input id="itemName" required placeholder="e.g. Layer mash"></div>
+      <div class="field-row">
+        <div class="field"><label for="itemQuantity">Starting quantity</label><input id="itemQuantity" type="number" step="0.01" min="0" value="0"></div>
+        <div class="field"><label for="itemThreshold">Low-stock threshold</label><input id="itemThreshold" type="number" step="0.01" min="0" value="0"></div>
+      </div>
+      <div class="field"><label for="itemUnitCost">Unit cost <span style="font-weight:400">(optional)</span></label><input id="itemUnitCost" type="number" step="0.0001" min="0"></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn--outline" data-close="createModal">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="createSubmitBtn">Create item</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══════ Adjust stock modal ═══════ -->
+<div class="modal-overlay" id="adjustModal">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <h2 id="adjustItemName">Adjust stock</h2>
+      <button class="modal-close" data-close="adjustModal">✕</button>
+    </div>
+    <div class="alert alert--error" id="adjustAlert"></div>
+    <form id="adjustForm">
+      <div class="field">
+        <label for="adjustDelta">Change</label>
+        <input id="adjustDelta" type="number" step="0.01" required placeholder="e.g. 50 to add, -10 to remove">
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn--outline" data-close="adjustModal">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="adjustSubmitBtn">Apply</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══════ Edit item modal ═══════ -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Edit item</h2>
+      <button class="modal-close" data-close="editModal">✕</button>
+    </div>
+    <div class="alert alert--error" id="editAlert"></div>
+    <form id="editForm">
+      <div class="field"><label for="editItemName">Name</label><input id="editItemName" required></div>
+      <div class="field-row">
+        <div class="field"><label for="editItemUnit">Unit</label><input id="editItemUnit" required></div>
+        <div class="field"><label for="editItemThreshold">Low-stock threshold</label><input id="editItemThreshold" type="number" step="0.01" min="0"></div>
+      </div>
+      <div class="field"><label for="editItemUnitCost">Unit cost <span style="font-weight:400">(optional)</span></label><input id="editItemUnitCost" type="number" step="0.0001" min="0"></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn--outline" data-close="editModal">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="editSubmitBtn">Save changes</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/static/inventory.js"></script>
+</body>
+</html>

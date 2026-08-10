@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>
+  (function() {
+    try {
+      var t = localStorage.getItem('farmwise_theme');
+      if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    } catch (e) {}
+  })();
+</script>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Workers — FarmWise AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/static/workers.css"/>
+</head>
+<body>
+
+<div class="shell">
+  <aside class="sidebar">
+    <a href="/" class="logo">🌱 Farm<span>Wise</span></a>
+    <nav class="side-nav">
+      <a href="/dashboard" class="side-link">📊 Dashboard</a>
+      <a href="/animals" class="side-link">🐔 Animals</a>
+      <a href="/feed" class="side-link">🌾 Feed</a>
+      <a href="/finance" class="side-link">💰 Finance</a>
+      <a href="/inventory" class="side-link">📦 Inventory</a>
+      <a href="/workers" class="side-link active">👷 Workers</a>
+      <a href="#" class="side-link">✨ AI Assistant</a>
+      <a href="/settings" class="side-link">⚙️ Settings</a>
+    </nav>
+    <button class="theme-toggle" onclick="toggleLightMode()" id="themeBtn">🌙 Toggle theme</button>
+    <button class="logout-btn" id="logoutBtn">Log out</button>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:14px">
+        <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">☰</button>
+        <div>
+          <div class="farm-name" id="farmName">Loading…</div>
+          <div class="farm-sub" id="userGreeting"></div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <span class="badge" id="roleBadge"></span>
+      </div>
+    </header>
+
+    <div class="content" id="pageContent" style="display:none">
+      <div class="toolbar">
+        <h1>Workers</h1>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <div class="status-tabs" id="statusTabs">
+            <span class="status-tab active" data-filter="">All</span>
+            <span class="status-tab" data-filter="active">Active</span>
+            <span class="status-tab" data-filter="inactive">Inactive</span>
+          </div>
+          <button class="btn btn--primary" id="newWorkerBtn">+ New worker</button>
+        </div>
+      </div>
+
+      <div class="worker-grid" id="workerGrid"></div>
+
+      <div class="empty-state" id="emptyState" style="display:none">
+        <div class="empty-icon">👷</div>
+        <h2>No workers yet</h2>
+        <p>Add farm employees to track attendance and payroll.</p>
+        <button class="btn btn--primary" id="emptyNewWorkerBtn">+ New worker</button>
+      </div>
+    </div>
+
+    <div class="content" id="noFarmState" style="display:none">
+      <div class="empty-state">
+        <div class="empty-icon">🌱</div>
+        <h2>No farm yet</h2>
+        <p>You'll need a farm before you can add workers.</p>
+      </div>
+    </div>
+  </main>
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<!-- ═══════ Create worker modal ═══════ -->
+<div class="modal-overlay" id="createModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>New worker</h2>
+      <button class="modal-close" data-close="createModal">✕</button>
+    </div>
+    <div class="alert alert--error" id="createAlert"></div>
+    <form id="createForm">
+      <div class="field"><label for="workerName">Full name</label><input id="workerName" required></div>
+      <div class="field-row">
+        <div class="field"><label for="workerPosition">Position <span style="font-weight:400">(optional)</span></label><input id="workerPosition" placeholder="e.g. Farmhand"></div>
+        <div class="field"><label for="workerPhone">Phone <span style="font-weight:400">(optional)</span></label><input id="workerPhone"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label for="workerWage">Wage amount <span style="font-weight:400">(optional)</span></label><input id="workerWage" type="number" step="0.01" min="0"></div>
+        <div class="field"><label for="workerWageType">Wage type <span style="font-weight:400">(optional)</span></label>
+          <select id="workerWageType">
+            <option value="">—</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </div>
+      </div>
+      <div class="field"><label for="workerHireDate">Hire date <span style="font-weight:400">(optional)</span></label><input id="workerHireDate" type="date"></div>
+      <div class="field"><label for="workerNotes">Notes <span style="font-weight:400">(optional)</span></label><textarea id="workerNotes" rows="2"></textarea></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn--outline" data-close="createModal">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="createSubmitBtn">Add worker</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══════ Worker detail modal ═══════ -->
+<div class="modal-overlay" id="detailModal">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <h2 id="detailWorkerName">Worker</h2>
+      <button class="modal-close" data-close="detailModal">✕</button>
+    </div>
+
+    <div class="alert alert--error" id="editAlert"></div>
+    <form id="editForm">
+      <div class="field-row">
+        <div class="field"><label for="editName">Full name</label><input id="editName" required></div>
+        <div class="field"><label for="editPosition">Position</label><input id="editPosition"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label for="editPhone">Phone</label><input id="editPhone"></div>
+        <div class="field"><label for="editStatus">Status</label>
+          <select id="editStatus">
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label for="editWage">Wage amount</label><input id="editWage" type="number" step="0.01" min="0"></div>
+        <div class="field"><label for="editWageType">Wage type</label>
+          <select id="editWageType">
+            <option value="">—</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </div>
+      </div>
+      <div class="field"><label for="editNotes">Notes</label><textarea id="editNotes" rows="2"></textarea></div>
+      <div class="form-actions" style="justify-content:space-between">
+        <button type="button" class="btn btn--danger btn--sm" id="deleteWorkerBtn">Delete worker</button>
+        <button type="submit" class="btn btn--primary btn--sm" id="editSubmitBtn">Save changes</button>
+      </div>
+    </form>
+
+    <div class="divider"></div>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="attendance">Attendance</div>
+      <div class="tab" data-tab="payroll">Payroll</div>
+    </div>
+
+    <div class="tab-panel active" id="tabAttendance">
+      <div class="record-list" id="attendanceList"></div>
+      <div class="alert alert--error" id="attendanceAlert"></div>
+      <form id="attendanceForm">
+        <div class="section-title">Record attendance</div>
+        <div class="field-row">
+          <div class="field"><label for="aDate">Date</label><input id="aDate" type="date" required></div>
+          <div class="field"><label for="aStatus">Status</label>
+            <select id="aStatus" required>
+              <option value="present">Present</option>
+              <option value="absent">Absent</option>
+              <option value="half_day">Half day</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-actions"><button type="submit" class="btn btn--primary btn--sm">Record</button></div>
+      </form>
+    </div>
+
+    <div class="tab-panel" id="tabPayroll">
+      <div class="record-list" id="paymentList"></div>
+      <div class="alert alert--error" id="paymentAlert"></div>
+      <form id="paymentForm">
+        <div class="section-title">Log a payment</div>
+        <div class="field-row">
+          <div class="field"><label for="payAmount">Amount</label><input id="payAmount" type="number" step="0.01" min="0.01" required></div>
+          <div class="field"><label for="payDate">Payment date</label><input id="payDate" type="date" required></div>
+        </div>
+        <div class="form-actions"><button type="submit" class="btn btn--primary btn--sm">Log payment</button></div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script src="/static/workers.js"></script>
+</body>
+</html>

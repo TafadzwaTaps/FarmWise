@@ -70,4 +70,11 @@ def delete_farm(farm_id: str, _member: dict = Depends(require_farm_role(*_OWNER_
 
 @router.get("/{farm_id}/members")
 def list_members(farm_id: str, _member: dict = Depends(require_farm_role())):
-    return crud.list_members(farm_id)
+    members = crud.list_members(farm_id)
+    # Enrich with the info actually worth displaying — a bare user_id UUID
+    # isn't useful in a team list.
+    for m in members:
+        user = crud.get_user_by_id(m["user_id"])
+        m["user_full_name"] = user["full_name"] if user else "Unknown user"
+        m["user_email"] = user["email"] if user else None
+    return members

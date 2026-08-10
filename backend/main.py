@@ -58,6 +58,8 @@ from routes.animal_routes import router as animal_router
 from routes.feed_routes import router as feed_router
 from routes.finance_routes import router as finance_router
 from routes.inventory_routes import router as inventory_router
+from routes.dashboard_routes import router as dashboard_router
+from routes.worker_routes import router as worker_router
 from services.security import RateLimitExceeded
 
 APP_NAME = os.getenv("APP_NAME", "FarmWise AI")
@@ -139,6 +141,36 @@ def dashboard_page():
     return _html("dashboard.html")
 
 
+@app.get("/animals", include_in_schema=False)
+def animals_page():
+    return _html("animals.html")
+
+
+@app.get("/finance", include_in_schema=False)
+def finance_page():
+    return _html("finance.html")
+
+
+@app.get("/feed", include_in_schema=False)
+def feed_page():
+    return _html("feed.html")
+
+
+@app.get("/inventory", include_in_schema=False)
+def inventory_page():
+    return _html("inventory.html")
+
+
+@app.get("/workers", include_in_schema=False)
+def workers_page():
+    return _html("workers.html")
+
+
+@app.get("/settings", include_in_schema=False)
+def settings_page():
+    return _html("settings.html")
+
+
 # ── Exception handlers ──────────────────────────────────────────────────
 
 @app.exception_handler(HTTPException)
@@ -185,7 +217,9 @@ app.include_router(animal_router, prefix=API_V1_PREFIX)
 app.include_router(feed_router, prefix=API_V1_PREFIX)
 app.include_router(finance_router, prefix=API_V1_PREFIX)
 app.include_router(inventory_router, prefix=API_V1_PREFIX)
-# Next up (not yet built): workers, calendar, AI assistant, reports, admin —
+app.include_router(dashboard_router, prefix=API_V1_PREFIX)
+app.include_router(worker_router, prefix=API_V1_PREFIX)
+# Next up (not yet built): calendar, AI assistant, reports, admin —
 # follow the same routes/<domain>_routes.py + crud/<domain>.py pattern.
 
 

@@ -81,3 +81,17 @@ from crud.inventory import (  # noqa: F401
     adjust_stock,
     delete_item,
 )
+
+from crud.dashboard import dashboard_summary  # noqa: F401
+
+from crud.workers import (  # noqa: F401
+    create_worker,
+    get_worker,
+    list_workers,
+    update_worker,
+    delete_worker,
+    record_attendance,
+    list_attendance,
+    create_payment,
+    list_payments,
+)

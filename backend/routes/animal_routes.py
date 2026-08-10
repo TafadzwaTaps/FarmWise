@@ -3,6 +3,7 @@ Routes: /farms/{farm_id}/animals/batches, .../mortality, .../medication
 """
 
 from datetime import date
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -17,15 +18,19 @@ router = APIRouter(prefix="/farms/{farm_id}/animals", tags=["Animals"])
 _MANAGE_ROLES = ("farmer", "farm_manager")
 _RECORD_ROLES = ("farmer", "farm_manager", "worker")
 
-VALID_SPECIES = {
+Species = Literal[
     "chicken_layer", "chicken_broiler", "pig", "cattle", "goat", "sheep",
     "rabbit", "fish", "turkey", "duck", "bee", "other",
-}
+]
+MedicationType = Literal["vaccine", "medicine", "deworming", "treatment"]
+
+# Kept for anything that still wants the plain set (e.g. tests, docs).
+VALID_SPECIES = set(Species.__args__)
 
 
 class AnimalBatchCreate(BaseModel):
     batch_name: str = Field(min_length=1, max_length=150)
-    species: str
+    species: Species
     breed: str | None = None
     quantity_initial: int = Field(gt=0)
     purchase_date: date | None = None
@@ -44,7 +49,7 @@ class MortalityCreate(BaseModel):
 
 
 class MedicationCreate(BaseModel):
-    type: str  # vaccine | medicine | deworming | treatment
+    type: MedicationType
     name: str
     date_administered: date | None = None
     next_due_date: date | None = None

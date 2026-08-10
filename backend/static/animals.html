@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>
+  (function() {
+    try {
+      var t = localStorage.getItem('farmwise_theme');
+      if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    } catch (e) {}
+  })();
+</script>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Animals — FarmWise AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/static/animals.css"/>
+</head>
+<body>
+
+<div class="shell">
+  <aside class="sidebar">
+    <a href="/" class="logo">🌱 Farm<span>Wise</span></a>
+    <nav class="side-nav">
+      <a href="/dashboard" class="side-link">📊 Dashboard</a>
+      <a href="/animals" class="side-link active">🐔 Animals</a>
+      <a href="/feed" class="side-link">🌾 Feed</a>
+      <a href="/finance" class="side-link">💰 Finance</a>
+      <a href="/inventory" class="side-link">📦 Inventory</a>
+      <a href="/workers" class="side-link">👷 Workers</a>
+      <a href="#" class="side-link">✨ AI Assistant</a>
+      <a href="/settings" class="side-link">⚙️ Settings</a>
+    </nav>
+    <button class="theme-toggle" onclick="toggleLightMode()" id="themeBtn">🌙 Toggle theme</button>
+    <button class="logout-btn" id="logoutBtn">Log out</button>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:14px">
+        <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">☰</button>
+        <div>
+          <div class="farm-name" id="farmName">Loading…</div>
+          <div class="farm-sub" id="userGreeting"></div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <span class="badge" id="roleBadge"></span>
+      </div>
+    </header>
+
+    <div class="content" id="pageContent" style="display:none">
+      <div class="toolbar">
+        <h1>Animal Batches</h1>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <div class="status-tabs" id="statusTabs">
+            <span class="status-tab active" data-filter="">All</span>
+            <span class="status-tab" data-filter="active">Active</span>
+            <span class="status-tab" data-filter="closed">Closed</span>
+          </div>
+          <button class="btn btn--primary" id="newBatchBtn">+ New Batch</button>
+        </div>
+      </div>
+
+      <div class="batch-grid" id="batchGrid"></div>
+
+      <div class="empty-state" id="emptyState" style="display:none">
+        <div class="empty-icon">🐔</div>
+        <h2>No batches yet</h2>
+        <p>Add your first batch of animals to start tracking growth, feed, mortality, and sales.</p>
+        <button class="btn btn--primary" id="emptyNewBatchBtn">+ New Batch</button>
+      </div>
+    </div>
+
+    <div class="content" id="noFarmState" style="display:none">
+      <div class="empty-state">
+        <div class="empty-icon">🌱</div>
+        <h2>No farm yet</h2>
+        <p>You'll need a farm before you can add animal batches.</p>
+      </div>
+    </div>
+  </main>
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<!-- ═══════ Create batch modal ═══════ -->
+<div class="modal-overlay" id="createModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>New animal batch</h2>
+      <button class="modal-close" data-close="createModal">✕</button>
+    </div>
+    <div class="alert alert--error" id="createAlert"></div>
+    <form id="createForm">
+      <div class="field"><label for="batchName">Batch name</label><input id="batchName" required placeholder="e.g. 200 Broilers - March"></div>
+      <div class="field-row">
+        <div class="field"><label for="species">Species</label>
+          <select id="species" required>
+            <option value="">Select…</option>
+            <option value="chicken_broiler">Chicken (Broiler)</option>
+            <option value="chicken_layer">Chicken (Layer)</option>
+            <option value="cattle">Cattle</option>
+            <option value="goat">Goat</option>
+            <option value="sheep">Sheep</option>
+            <option value="pig">Pig</option>
+            <option value="rabbit">Rabbit</option>
+            <option value="fish">Fish</option>
+            <option value="turkey">Turkey</option>
+            <option value="duck">Duck</option>
+            <option value="bee">Bee</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="field"><label for="breed">Breed <span style="font-weight:400">(optional)</span></label><input id="breed"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label for="quantityInitial">Starting quantity</label><input id="quantityInitial" type="number" min="1" required></div>
+        <div class="field"><label for="purchaseDate">Purchase date <span style="font-weight:400">(optional)</span></label><input id="purchaseDate" type="date"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label for="purchasePriceTotal">Purchase cost <span style="font-weight:400">(optional)</span></label><input id="purchasePriceTotal" type="number" step="0.01" min="0"></div>
+        <div class="field"><label for="supplier">Supplier <span style="font-weight:400">(optional)</span></label><input id="supplier"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label for="averageWeightKg">Avg. weight (kg) <span style="font-weight:400">(optional)</span></label><input id="averageWeightKg" type="number" step="0.01" min="0"></div>
+        <div class="field"><label for="expectedSellingDate">Expected selling date <span style="font-weight:400">(optional)</span></label><input id="expectedSellingDate" type="date"></div>
+      </div>
+      <div class="field"><label for="notes">Notes <span style="font-weight:400">(optional)</span></label><textarea id="notes" rows="2"></textarea></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn--outline" data-close="createModal">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="createSubmitBtn">Create batch</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══════ Batch detail modal ═══════ -->
+<div class="modal-overlay" id="detailModal">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <h2 id="detailBatchName">Batch</h2>
+      <button class="modal-close" data-close="detailModal">✕</button>
+    </div>
+
+    <div id="detailOverview" style="margin-bottom:18px;font-size:13px;color:var(--text-dim)"></div>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="mortality">Mortality</div>
+      <div class="tab" data-tab="medication">Medication</div>
+    </div>
+
+    <div class="tab-panel active" id="tabMortality">
+      <div class="record-list" id="mortalityList"></div>
+      <div class="alert alert--error" id="mortalityAlert"></div>
+      <form id="mortalityForm">
+        <div class="section-title">Record deaths</div>
+        <div class="field-row">
+          <div class="field"><label for="mDate">Date</label><input id="mDate" type="date" required></div>
+          <div class="field"><label for="mQuantity">Quantity</label><input id="mQuantity" type="number" min="1" required></div>
+        </div>
+        <div class="field"><label for="mCause">Cause <span style="font-weight:400">(optional)</span></label><input id="mCause"></div>
+        <div class="form-actions"><button type="submit" class="btn btn--primary btn--sm">Record</button></div>
+      </form>
+    </div>
+
+    <div class="tab-panel" id="tabMedication">
+      <div class="record-list" id="medicationList"></div>
+      <div class="alert alert--error" id="medicationAlert"></div>
+      <form id="medicationForm">
+        <div class="section-title">Log vaccine / medicine / treatment</div>
+        <div class="field-row">
+          <div class="field"><label for="medType">Type</label>
+            <select id="medType" required>
+              <option value="vaccine">Vaccine</option>
+              <option value="medicine">Medicine</option>
+              <option value="deworming">Deworming</option>
+              <option value="treatment">Treatment</option>
+            </select>
+          </div>
+          <div class="field"><label for="medName">Name</label><input id="medName" required placeholder="e.g. Newcastle disease vaccine"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label for="medDateAdministered">Date administered <span style="font-weight:400">(optional)</span></label><input id="medDateAdministered" type="date"></div>
+          <div class="field"><label for="medNextDueDate">Next due <span style="font-weight:400">(optional)</span></label><input id="medNextDueDate" type="date"></div>
+        </div>
+        <div class="form-actions"><button type="submit" class="btn btn--primary btn--sm">Log</button></div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script src="/static/animals.js"></script>
+</body>
+</html>

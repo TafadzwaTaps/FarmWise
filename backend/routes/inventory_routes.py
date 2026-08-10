@@ -2,6 +2,8 @@
 Routes: /farms/{farm_id}/inventory, .../{item_id}, .../{item_id}/adjust
 """
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -13,11 +15,14 @@ router = APIRouter(prefix="/farms/{farm_id}/inventory", tags=["Inventory"])
 _MANAGE_ROLES = ("farmer", "farm_manager")
 _ADJUST_ROLES = ("farmer", "farm_manager", "worker")
 
-INVENTORY_CATEGORIES = {"feed", "medicine", "equipment", "tools", "packaging"}
+InventoryCategory = Literal["feed", "medicine", "equipment", "tools", "packaging"]
+
+# Kept for anything that still wants the plain set (e.g. tests, docs).
+INVENTORY_CATEGORIES = set(InventoryCategory.__args__)
 
 
 class InventoryItemCreate(BaseModel):
-    category: str
+    category: InventoryCategory
     name: str = Field(min_length=1, max_length=150)
     unit: str = Field(min_length=1, max_length=20)
     quantity_on_hand: float = Field(default=0, ge=0)
@@ -35,7 +40,6 @@ class InventoryItemUpdate(BaseModel):
 class InventoryAdjustment(BaseModel):
     """Positive delta = stock in, negative = stock out."""
     delta: float
-    reason: str | None = None
 
 
 def _get_item_or_404(farm_id: str, item_id: str) -> dict:

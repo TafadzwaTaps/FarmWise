@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>
+  (function() {
+    try {
+      var t = localStorage.getItem('farmwise_theme');
+      if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    } catch (e) {}
+  })();
+</script>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Feed — FarmWise AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/static/feed.css"/>
+</head>
+<body>
+
+<div class="shell">
+  <aside class="sidebar">
+    <a href="/" class="logo">🌱 Farm<span>Wise</span></a>
+    <nav class="side-nav">
+      <a href="/dashboard" class="side-link">📊 Dashboard</a>
+      <a href="/animals" class="side-link">🐔 Animals</a>
+      <a href="/feed" class="side-link active">🌾 Feed</a>
+      <a href="/finance" class="side-link">💰 Finance</a>
+      <a href="/inventory" class="side-link">📦 Inventory</a>
+      <a href="/workers" class="side-link">👷 Workers</a>
+      <a href="#" class="side-link">✨ AI Assistant</a>
+      <a href="/settings" class="side-link">⚙️ Settings</a>
+    </nav>
+    <button class="theme-toggle" onclick="toggleLightMode()" id="themeBtn">🌙 Toggle theme</button>
+    <button class="logout-btn" id="logoutBtn">Log out</button>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:14px">
+        <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">☰</button>
+        <div>
+          <div class="farm-name" id="farmName">Loading…</div>
+          <div class="farm-sub" id="userGreeting"></div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <span class="badge" id="roleBadge"></span>
+      </div>
+    </header>
+
+    <div class="content" id="pageContent" style="display:none">
+
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">Total Purchased</div>
+          <div class="stat-value" id="statPurchased">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Consumed</div>
+          <div class="stat-value" id="statConsumed">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Remaining (kg)</div>
+          <div class="stat-value" id="statRemaining">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Avg. Cost / kg</div>
+          <div class="stat-value" id="statAvgCost">—</div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="entity-tabs" id="entityTabs">
+          <span class="entity-tab active" data-tab="purchases">Purchases</span>
+          <span class="entity-tab" data-tab="consumption">Consumption</span>
+        </div>
+        <button class="btn btn--primary" id="addBtn">+ New purchase</button>
+      </div>
+
+      <div class="panel">
+        <div id="purchasesTable"></div>
+        <div id="consumptionTable" style="display:none"></div>
+      </div>
+    </div>
+
+    <div class="content" id="noFarmState" style="display:none">
+      <div class="empty-state">
+        <div class="empty-icon">🌱</div>
+        <h2>No farm yet</h2>
+        <p>You'll need a farm before you can log feed purchases or consumption.</p>
+      </div>
+    </div>
+  </main>
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<!-- ═══════ New purchase modal ═══════ -->
+<div class="modal-overlay" id="purchaseModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>New feed purchase</h2>
+      <button class="modal-close" data-close="purchaseModal">✕</button>
+    </div>
+    <div class="alert alert--error" id="purchaseAlert"></div>
+    <form id="purchaseForm">
+      <div class="field"><label for="pFeedType">Feed type</label><input id="pFeedType" required placeholder="e.g. Broiler starter"></div>
+      <div class="field-row">
+        <div class="field"><label for="pQuantity">Quantity (kg)</label><input id="pQuantity" type="number" step="0.01" min="0.01" required></div>
+        <div class="field"><label for="pUnitCost">Unit cost (per kg)</label><input id="pUnitCost" type="number" step="0.0001" min="0" required></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label for="pDate">Purchase date</label><input id="pDate" type="date" required></div>
+        <div class="field"><label for="pSupplier">Supplier <span style="font-weight:400">(optional)</span></label><input id="pSupplier"></div>
+      </div>
+      <div class="field"><label for="pNotes">Notes <span style="font-weight:400">(optional)</span></label><textarea id="pNotes" rows="2"></textarea></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn--outline" data-close="purchaseModal">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="purchaseSubmitBtn">Log purchase</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══════ New consumption modal ═══════ -->
+<div class="modal-overlay" id="consumptionModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Log feed consumption</h2>
+      <button class="modal-close" data-close="consumptionModal">✕</button>
+    </div>
+    <div class="alert alert--error" id="consumptionAlert"></div>
+    <form id="consumptionForm">
+      <div class="field"><label for="cBatch">Batch <span style="font-weight:400">(optional)</span></label>
+        <select id="cBatch"><option value="">— Not tied to a batch —</option></select>
+      </div>
+      <div class="field"><label for="cFeedType">Feed type</label><input id="cFeedType" required placeholder="e.g. Broiler starter"></div>
+      <div class="field-row">
+        <div class="field"><label for="cQuantity">Quantity (kg)</label><input id="cQuantity" type="number" step="0.01" min="0.01" required></div>
+        <div class="field"><label for="cDate">Date</label><input id="cDate" type="date" required></div>
+      </div>
+      <div class="field"><label for="cNotes">Notes <span style="font-weight:400">(optional)</span></label><textarea id="cNotes" rows="2"></textarea></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn--outline" data-close="consumptionModal">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="consumptionSubmitBtn">Log consumption</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/static/feed.js"></script>
+</body>
+</html>

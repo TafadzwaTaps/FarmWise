@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>
+  (function() {
+    try {
+      var t = localStorage.getItem('farmwise_theme');
+      if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    } catch (e) {}
+  })();
+</script>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Settings — FarmWise AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/static/settings.css"/>
+</head>
+<body>
+
+<div class="shell">
+  <aside class="sidebar">
+    <a href="/" class="logo">🌱 Farm<span>Wise</span></a>
+    <nav class="side-nav">
+      <a href="/dashboard" class="side-link">📊 Dashboard</a>
+      <a href="/animals" class="side-link">🐔 Animals</a>
+      <a href="/feed" class="side-link">🌾 Feed</a>
+      <a href="/finance" class="side-link">💰 Finance</a>
+      <a href="/inventory" class="side-link">📦 Inventory</a>
+      <a href="/workers" class="side-link">👷 Workers</a>
+      <a href="#" class="side-link">✨ AI Assistant</a>
+      <a href="/settings" class="side-link active">⚙️ Settings</a>
+    </nav>
+    <button class="theme-toggle" onclick="toggleLightMode()" id="themeBtn">🌙 Toggle theme</button>
+    <button class="logout-btn" id="logoutBtn">Log out</button>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:14px">
+        <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">☰</button>
+        <div>
+          <div class="farm-name" id="farmName">Loading…</div>
+          <div class="farm-sub" id="userGreeting"></div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <span class="badge" id="roleBadge"></span>
+      </div>
+    </header>
+
+    <div class="content" id="pageContent" style="display:none">
+
+      <div class="panel" style="margin-bottom:16px">
+        <div class="section-title">Farm info</div>
+        <div class="alert alert--error" id="farmAlert"></div>
+        <div class="alert alert--success" id="farmSuccessAlert"></div>
+        <form id="farmForm">
+          <div class="field"><label for="farmNameInput">Name</label><input id="farmNameInput" required></div>
+          <div class="field-row">
+            <div class="field"><label for="farmLocation">Location <span style="font-weight:400">(optional)</span></label><input id="farmLocation"></div>
+            <div class="field"><label for="farmSize">Size (hectares) <span style="font-weight:400">(optional)</span></label><input id="farmSize" type="number" step="0.01" min="0"></div>
+          </div>
+          <div class="field"><label for="farmCurrency">Currency</label>
+            <select id="farmCurrency">
+              <option value="USD">USD</option>
+              <option value="ZWL">ZWL</option>
+              <option value="ZAR">ZAR</option>
+              <option value="ZMW">ZMW</option>
+              <option value="KES">KES</option>
+            </select>
+          </div>
+          <div class="field"><label for="farmDescription">Description <span style="font-weight:400">(optional)</span></label><textarea id="farmDescription" rows="2"></textarea></div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn--primary" id="farmSubmitBtn">Save changes</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px">
+        <div class="section-title">Team members</div>
+        <div id="membersList"></div>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px">
+        <div class="section-title">Add another farm</div>
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px">
+          You'll own the new farm and can switch to it from the farm selector in the top bar.
+        </p>
+        <div class="alert alert--error" id="newFarmAlert"></div>
+        <form id="newFarmForm">
+          <div class="field-row">
+            <div class="field"><label for="newFarmName">Farm name</label><input id="newFarmName" required></div>
+            <div class="field"><label for="newFarmLocation">Location <span style="font-weight:400">(optional)</span></label><input id="newFarmLocation"></div>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn--outline" id="newFarmSubmitBtn">+ Create farm</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="danger-zone">
+        <div class="section-title" style="color:var(--red)">Danger zone</div>
+        <p>Deleting a farm removes it from your list. Historical records are preserved but the farm
+           itself becomes inaccessible. Only the farm owner can do this.</p>
+        <div class="alert alert--error" id="deleteAlert"></div>
+        <button class="btn btn--danger" id="deleteFarmBtn">Delete this farm</button>
+      </div>
+    </div>
+
+    <div class="content" id="noFarmState" style="display:none">
+      <div class="empty-state">
+        <div class="empty-icon">🌱</div>
+        <h2>No farm yet</h2>
+        <p>Nothing to configure until you have a farm.</p>
+      </div>
+    </div>
+  </main>
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<script src="/static/settings.js"></script>
+</body>
+</html>
