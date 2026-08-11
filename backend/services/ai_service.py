@@ -110,6 +110,19 @@ def chat(farm_id: str, user_id: str, farm_name: str, currency: str, message: str
             "Free keys are available at aistudio.google.com."
         )
 
+    # Catches the single most common misconfiguration before ever making a
+    # network call: pasting the WRONG provider's key into GEMINI_API_KEY.
+    # Google AI Studio keys always start with "AIza"; Anthropic keys start
+    # with "sk-ant-", OpenAI keys with "sk-", etc. A wrong-provider key
+    # would otherwise fail as an opaque 401 from Google with no hint why.
+    if not api_key.startswith("AIza"):
+        log.error("ai_chat_key_wrong_format farm_id=%s prefix=%s", farm_id, api_key[:8])
+        raise AssistantUnavailableError(
+            "GEMINI_API_KEY doesn't look like a Google AI Studio key (those start with 'AIza...'). "
+            "This looks like it might be a key from a different provider — double check the value "
+            "in Render's environment variables against the key shown at aistudio.google.com."
+        )
+
     context = _build_farm_context(farm_id)
     system = _system_prompt(farm_name, currency, context)
 
@@ -130,6 +143,7 @@ def chat(farm_id: str, user_id: str, farm_name: str, currency: str, message: str
         res = httpx.post(
             url,
             headers={"x-goog-api-key": api_key, "content-type": "application/json"},
+            params={"key": api_key},  # some proxies/environments only honor the query param — send both
             json={
                 "contents": contents,
                 "systemInstruction": {"parts": [{"text": system}]},
@@ -154,8 +168,15 @@ def chat(farm_id: str, user_id: str, farm_name: str, currency: str, message: str
             raise AssistantUnavailableError("Empty response from model")
         return reply
     except httpx.HTTPStatusError as exc:
-        log.error("ai_chat_http_error farm_id=%s status=%s body=%s", farm_id, exc.response.status_code, exc.response.text[:300])
-        raise AssistantUnavailableError(f"AI service returned {exc.response.status_code}") from exc
+        status = exc.response.status_code
+        log.error("ai_chat_http_error farm_id=%s status=%s body=%s", farm_id, status, exc.response.text[:300])
+        if status in (401, 403):
+            raise AssistantUnavailableError(
+                f"Gemini rejected the API key (status {status}). Verify GEMINI_API_KEY in Render's "
+                "environment matches an active key from aistudio.google.com, and that the key hasn't "
+                "been deleted or regenerated since it was set."
+            ) from exc
+        raise AssistantUnavailableError(f"AI service returned {status}") from exc
     except httpx.HTTPError as exc:
         log.error("ai_chat_network_error farm_id=%s error=%s", farm_id, exc)
         raise AssistantUnavailableError("Could not reach the AI service") from exc

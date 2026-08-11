@@ -34,8 +34,11 @@ def send_message(
 
     try:
         reply = ai_chat(farm_id, user["user_id"], farm["name"], farm.get("currency", "USD"), data.message)
-    except AssistantUnavailableError:
-        reply = "I'm having trouble reaching the AI service right now. Please try again in a moment."
+    except AssistantUnavailableError as exc:
+        # Config errors (bad API key, wrong provider's key, etc.) come with
+        # an actionable message worth showing directly — "try again" would
+        # be actively misleading for something a retry can't fix.
+        reply = str(exc) or "I'm having trouble reaching the AI service right now. Please try again in a moment."
 
     saved = crud.create_ai_message(farm_id, user["user_id"], "assistant", reply)
     return {"reply": reply, "created_at": saved["created_at"]}
