@@ -31,16 +31,21 @@ if _BACKEND not in _sys.path:
 load_dotenv()
 
 # ── Static dir ───────────────────────────────────────────────────────────
-# Frontend lives alongside the backend now (backend/static/), same as
-# WaziBot — one Render Web Service, one URL, no separate Static Site to
-# misconfigure and no cross-origin CORS to keep in sync.
+# The frontend lives as a sibling of backend/ — project_root/frontend/ —
+# not nested inside backend/. It's still served by this same app (one
+# Render Web Service, one URL), just from a folder named "frontend"
+# rather than "static". The URL path stays /static regardless of what
+# the folder is actually called on disk — app.mount() below controls
+# that, not the directory name.
 _STATIC_CANDIDATES = [
-    _os.path.join(_BACKEND, "static"),
-    _os.path.join(_BACKEND, "..", "static"),
+    _os.path.join(_BACKEND, "..", "frontend"),   # project_root/frontend  (your actual layout)
+    _os.path.join(_BACKEND, "frontend"),          # backend/frontend
+    _os.path.join(_BACKEND, "static"),             # backend/static
+    _os.path.join(_BACKEND, "..", "static"),        # project_root/static
 ]
 STATIC_DIR = next(
     (_os.path.abspath(p) for p in _STATIC_CANDIDATES if _os.path.isdir(p)),
-    _os.path.abspath(_os.path.join(_BACKEND, "static")),
+    _os.path.abspath(_os.path.join(_BACKEND, "..", "frontend")),
 )
 
 # ── Logging ──────────────────────────────────────────────────────────────
