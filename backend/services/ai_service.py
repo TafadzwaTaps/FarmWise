@@ -110,21 +110,15 @@ def chat(farm_id: str, user_id: str, farm_name: str, currency: str, message: str
             "Free keys are available at aistudio.google.com."
         )
 
-    # Catches the single most common misconfiguration before ever making a
-    # network call: pasting the WRONG provider's key into GEMINI_API_KEY.
-    # Google AI Studio keys always start with "AIza"; Anthropic keys start
-    # with "sk-ant-", OpenAI keys with "sk-", etc. A wrong-provider key
-    # would otherwise fail as an opaque 401 from Google with no hint why.
-    if not api_key.startswith("AIza"):
-        log.error("ai_chat_key_wrong_format farm_id=%s prefix=%s", farm_id, api_key[:8])
-        raise AssistantUnavailableError(
-            "GEMINI_API_KEY doesn't look like a Google AI Studio key (those start with 'AIza...'). "
-            "This looks like it might be a key from a different provider — double check the value "
-            "in Render's environment variables against the key shown at aistudio.google.com."
-        )
-
     context = _build_farm_context(farm_id)
     system = _system_prompt(farm_name, currency, context)
+
+    # No format/prefix check on api_key here, deliberately: Google changed
+    # Gemini key formats from "AIza..." to "AQ.Ab..." (Auth keys) in June
+    # 2026 with no advance notice, silently breaking any code that assumed
+    # the old prefix was permanent. A key's shape was never a contract from
+    # the provider — let the actual API call be the only source of truth
+    # for whether a key works (see the 401/403 handling below).
 
     history = crud.list_ai_messages(farm_id, user_id, limit=CONTEXT_HISTORY_TURNS)
     # Gemini uses "model" for the assistant's own turns, not "assistant" —
