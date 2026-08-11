@@ -98,6 +98,17 @@ def _init() -> Client:
             "  ➜  Verify both values in Render → Environment are correct and saved."
         )
 
+    # Supabase's edge infrastructure recycles idle HTTP/2 connections; the
+    # *next* request to reuse a just-closed pooled connection fails with
+    # httpx.RemoteProtocolError("Server disconnected") — a transient,
+    # expected condition, not an application bug. httpx's transport-level
+    # retries transparently re-establishes the connection and retries once,
+    # so this never surfaces to a request at all. Every existing crud call
+    # goes through this same client, so this protects all of them without
+    # touching any of the crud/*.py call sites.
+    import httpx as _httpx
+    client.postgrest.session._transport = _httpx.HTTPTransport(retries=1)
+
     log.info("🟢 Supabase client initialised  url=%s…", url[:50])
     return client
 

@@ -14,6 +14,7 @@ All route logic lives in routes/. All data access lives in crud/
 import logging
 import os
 
+import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -201,6 +202,20 @@ async def rate_limit_exception_handler(request: Request, exc: RateLimitExceeded)
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         content={"error": {"message": f"Too many requests for {exc.limit_name}. Try again shortly."}},
         headers={"Retry-After": str(exc.retry_after)},
+    )
+
+
+@app.exception_handler(httpx.TransportError)
+async def transport_error_handler(request: Request, exc: httpx.TransportError):
+    # A Supabase connection drop that survived the transport-level retry
+    # (see core/db.py) — rare, but worth a specific 503 rather than a
+    # generic 500, since the honest answer is "try again", not "something's
+    # broken".
+    log.warning("supabase_transport_error path=%s error=%s", request.url, exc)
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"error": {"message": "Temporarily unable to reach the database. Please try again."}},
+        headers={"Retry-After": "2"},
     )
 
 
