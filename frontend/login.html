@@ -85,7 +85,7 @@
 
 <div class="left">
   <div>
-    <a href="landing.html" class="logo">🌱 Farm<span>Wise</span> AI</a>
+    <a href="/" class="logo">🌱 Farm<span>Wise</span> AI</a>
     <div class="tagline">SMART FARM MANAGEMENT</div>
   </div>
   <div class="feature-list">
@@ -93,7 +93,7 @@
     <div class="feature"><span class="feature-icon">🐔</span><div><div class="feature-title">Multi-farm, multi-role</div><div class="feature-desc">Owners, managers, workers, accountants — one account.</div></div></div>
     <div class="feature"><span class="feature-icon">✨</span><div><div class="feature-title">AI farm assistant</div><div class="feature-desc">Ask questions about your own farm data, anytime.</div></div></div>
   </div>
-  <div class="left-footer">New to FarmWise? <a href="signup.html">Start a free trial →</a></div>
+  <div class="left-footer">New to FarmWise? <a href="/signup">Start a free trial →</a></div>
 </div>
 
 <div class="right">
@@ -117,12 +117,12 @@
       </div>
       <div class="row">
         <label class="check-row"><input type="checkbox" id="remember" checked> Remember me</label>
-        <a href="forgot-password.html">Forgot password?</a>
+        <a href="/forgot-password">Forgot password?</a>
       </div>
       <button type="submit" class="btn" id="loginBtn">Log in</button>
     </form>
 
-    <p class="foot">Don't have an account? <a href="signup.html">Start free trial</a></p>
+    <p class="foot">Don't have an account? <a href="/signup">Start free trial</a></p>
   </div>
 </div>
 
@@ -140,9 +140,8 @@ function toggleLightMode() {
 })();
 
 // Point this at your Render-deployed FastAPI backend.
-const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-  ? 'http://localhost:8000/api/v1'
-  : 'https://farmwise-api.onrender.com/api/v1';
+// Same-origin — the frontend is served by this FastAPI app, so no host/CORS juggling.
+const API = '/api/v1';
 
 const form = document.getElementById('loginForm');
 const alertBox = document.getElementById('formAlert');
@@ -182,7 +181,7 @@ form.addEventListener('submit', async (e) => {
     const me = await meRes.json();
     store.setItem('farmwise_user', JSON.stringify(me));
 
-    window.location.href = 'dashboard.html';
+    window.location.href = '/dashboard';
   } catch (err) {
     showAlert(err.message || 'Could not log in. Check your details and try again.');
     submitBtn.disabled = false; submitBtn.textContent = 'Log in';

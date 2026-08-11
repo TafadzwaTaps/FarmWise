@@ -83,7 +83,7 @@
 
 <div class="left">
   <div>
-    <a href="landing.html" class="logo">🌱 Farm<span>Wise</span> AI</a>
+    <a href="/" class="logo">🌱 Farm<span>Wise</span> AI</a>
     <div class="tagline">FREE 14-DAY TRIAL</div>
   </div>
   <div class="feature-list">
@@ -91,7 +91,7 @@
     <div class="feature"><span class="feature-icon">🏡</span><div><div class="feature-title">You own the first farm you create</div><div class="feature-desc">Invite workers and managers once you're set up.</div></div></div>
     <div class="feature"><span class="feature-icon">📱</span><div><div class="feature-title">Works on phone or desktop</div><div class="feature-desc">Log feed and sales from wherever you are.</div></div></div>
   </div>
-  <div class="left-footer">Already have an account? <a href="login.html">Log in →</a></div>
+  <div class="left-footer">Already have an account? <a href="/login">Log in →</a></div>
 </div>
 
 <div class="right">
@@ -114,7 +114,7 @@
       <button type="submit" class="btn" id="registerBtn">Create account</button>
     </form>
 
-    <p class="foot">Already have an account? <a href="login.html">Log in</a></p>
+    <p class="foot">Already have an account? <a href="/login">Log in</a></p>
   </div>
 </div>
 
@@ -131,9 +131,8 @@ function toggleLightMode() {
   document.getElementById('themeBtn').textContent = isLight ? '☀️' : '🌙';
 })();
 
-const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-  ? 'http://localhost:8000/api/v1'
-  : 'https://farmwise-api.onrender.com/api/v1';
+// Same-origin — the frontend is served by this FastAPI app, so no host/CORS juggling.
+const API = '/api/v1';
 
 const form = document.getElementById('registerForm');
 const alertBox = document.getElementById('formAlert');
@@ -180,7 +179,7 @@ form.addEventListener('submit', async (e) => {
     const meRes = await fetch(API + '/auth/me', { headers: { 'Authorization': 'Bearer ' + tokens.access_token } });
     localStorage.setItem('farmwise_user', JSON.stringify(await meRes.json()));
 
-    window.location.href = 'dashboard.html';
+    window.location.href = '/dashboard';
   } catch (err) {
     showAlert(err.message || 'Could not create your account. Please try again.');
     submitBtn.disabled = false; submitBtn.textContent = 'Create account';
