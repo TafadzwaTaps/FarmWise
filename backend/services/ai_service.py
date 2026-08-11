@@ -6,6 +6,13 @@ crud functions every other route uses — nothing new to keep in sync) rather
 than letting the model guess. Degrades gracefully: no API key configured,
 or a network/API error, returns a clear, honest message instead of crashing
 the request — same philosophy as services/notification_service.py.
+
+Uses Google's Gemini API rather than a paid provider — its free tier (as of
+2026) needs no credit card and comfortably covers a farm assistant's usage.
+Get a key at https://aistudio.google.com (no billing setup required for the
+free tier). Swapping to a different provider later only means changing this
+file — routes/assistant_routes.py and crud/assistant.py don't know or care
+which model answers the question.
 """
 
 from __future__ import annotations
@@ -21,13 +28,14 @@ from crud.dashboard import dashboard_summary
 
 log = logging.getLogger("farmwise.ai")
 
-ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_VERSION = "2023-06-01"
-# Verify this against Anthropic's current model list before relying on it in
-# production — model names/aliases change over time and this was set at
-# writing time, not fetched live.
-DEFAULT_MODEL = "claude-3-5-sonnet-latest"
-MAX_TOKENS = 1024
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+# Verify this against Google AI Studio's current model list before relying
+# on it in production — Gemini model names/versions move fairly often, and
+# this was set at writing time, not fetched live. gemini-2.5-flash is the
+# free-tier baseline as of mid-2026; check aistudio.google.com for anything
+# newer with an active free tier.
+DEFAULT_MODEL = "gemini-2.5-flash"
+MAX_OUTPUT_TOKENS = 1024
 CONTEXT_HISTORY_TURNS = 10  # recent turns fed back to the model as conversation context
 
 
@@ -93,37 +101,55 @@ suggest they consult one.
 
 
 def chat(farm_id: str, user_id: str, farm_name: str, currency: str, message: str) -> str:
-    api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         log.warning("ai_chat_unconfigured farm_id=%s", farm_id)
         return (
             "The AI assistant isn't set up yet on this deployment — an administrator needs to add "
-            "an ANTHROPIC_API_KEY in the backend's environment variables to turn this on."
+            "a GEMINI_API_KEY in the backend's environment variables to turn this on. "
+            "Free keys are available at aistudio.google.com."
         )
 
     context = _build_farm_context(farm_id)
     system = _system_prompt(farm_name, currency, context)
 
     history = crud.list_ai_messages(farm_id, user_id, limit=CONTEXT_HISTORY_TURNS)
-    messages = [{"role": m["role"], "content": m["content"]} for m in history]
-    messages.append({"role": "user", "content": message})
+    # Gemini uses "model" for the assistant's own turns, not "assistant" —
+    # translating at the wire boundary keeps the app's own role vocabulary
+    # (used in the DB and everywhere else) provider-agnostic.
+    contents = [
+        {"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
+        for m in history
+    ]
+    contents.append({"role": "user", "parts": [{"text": message}]})
 
-    model = os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL)
+    model = os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
+    url = GEMINI_API_URL.format(model=model)
 
     try:
         res = httpx.post(
-            ANTHROPIC_API_URL,
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": ANTHROPIC_VERSION,
-                "content-type": "application/json",
+            url,
+            headers={"x-goog-api-key": api_key, "content-type": "application/json"},
+            json={
+                "contents": contents,
+                "systemInstruction": {"parts": [{"text": system}]},
+                "generationConfig": {"maxOutputTokens": MAX_OUTPUT_TOKENS},
             },
-            json={"model": model, "max_tokens": MAX_TOKENS, "system": system, "messages": messages},
             timeout=30.0,
         )
         res.raise_for_status()
         data = res.json()
-        reply = "".join(block.get("text", "") for block in data.get("content", []) if block.get("type") == "text")
+
+        candidates = data.get("candidates") or []
+        if not candidates:
+            # The prompt itself may have been blocked (safety filters, etc.)
+            # rather than a transport failure — worth a distinct message.
+            reason = (data.get("promptFeedback") or {}).get("blockReason")
+            log.warning("ai_chat_no_candidates farm_id=%s block_reason=%s", farm_id, reason)
+            raise AssistantUnavailableError(f"No response candidates (blockReason={reason})")
+
+        parts = candidates[0].get("content", {}).get("parts", [])
+        reply = "".join(p.get("text", "") for p in parts)
         if not reply:
             raise AssistantUnavailableError("Empty response from model")
         return reply
