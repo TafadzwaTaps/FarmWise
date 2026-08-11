@@ -66,6 +66,7 @@ from routes.finance_routes import router as finance_router
 from routes.inventory_routes import router as inventory_router
 from routes.dashboard_routes import router as dashboard_router
 from routes.worker_routes import router as worker_router
+from routes.assistant_routes import router as assistant_router
 from services.security import RateLimitExceeded
 
 APP_NAME = os.getenv("APP_NAME", "FarmWise AI")
@@ -172,6 +173,11 @@ def workers_page():
     return _html("workers.html")
 
 
+@app.get("/assistant", include_in_schema=False)
+def assistant_page():
+    return _html("assistant.html")
+
+
 @app.get("/settings", include_in_schema=False)
 def settings_page():
     return _html("settings.html")
@@ -239,7 +245,8 @@ app.include_router(finance_router, prefix=API_V1_PREFIX)
 app.include_router(inventory_router, prefix=API_V1_PREFIX)
 app.include_router(dashboard_router, prefix=API_V1_PREFIX)
 app.include_router(worker_router, prefix=API_V1_PREFIX)
-# Next up (not yet built): calendar, AI assistant, reports, admin —
+app.include_router(assistant_router, prefix=API_V1_PREFIX)
+# Next up (not yet built): calendar, reports, admin —
 # follow the same routes/<domain>_routes.py + crud/<domain>.py pattern.
 
 

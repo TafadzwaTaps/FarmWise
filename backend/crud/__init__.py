@@ -95,3 +95,9 @@ from crud.workers import (  # noqa: F401
     create_payment,
     list_payments,
 )
+
+from crud.assistant import (  # noqa: F401
+    create_ai_message,
+    list_ai_messages,
+    clear_ai_history,
+)

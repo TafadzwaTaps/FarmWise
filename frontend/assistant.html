@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>
+  (function() {
+    try {
+      var t = localStorage.getItem('farmwise_theme');
+      if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    } catch (e) {}
+  })();
+</script>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AI Assistant — FarmWise AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/static/assistant.css"/>
+</head>
+<body>
+
+<div class="shell">
+  <aside class="sidebar">
+    <a href="/" class="logo">🌱 Farm<span>Wise</span></a>
+    <nav class="side-nav">
+      <a href="/dashboard" class="side-link">📊 Dashboard</a>
+      <a href="/animals" class="side-link">🐔 Animals</a>
+      <a href="/feed" class="side-link">🌾 Feed</a>
+      <a href="/finance" class="side-link">💰 Finance</a>
+      <a href="/inventory" class="side-link">📦 Inventory</a>
+      <a href="/workers" class="side-link">👷 Workers</a>
+      <a href="/assistant" class="side-link active">✨ AI Assistant</a>
+      <a href="/settings" class="side-link">⚙️ Settings</a>
+    </nav>
+    <button class="theme-toggle" onclick="toggleLightMode()" id="themeBtn">🌙 Toggle theme</button>
+    <button class="logout-btn" id="logoutBtn">Log out</button>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:14px">
+        <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">☰</button>
+        <div>
+          <div class="farm-name" id="farmName">Loading…</div>
+          <div class="farm-sub" id="userGreeting"></div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <span class="badge" id="roleBadge"></span>
+      </div>
+    </header>
+
+    <div class="content" id="pageContent" style="display:none;padding-bottom:0">
+      <div class="chat-shell">
+        <div class="chat-toolbar">
+          <h1>✨ AI Assistant</h1>
+          <button class="btn btn--outline btn--sm" id="clearBtn">Clear conversation</button>
+        </div>
+
+        <div class="chat-messages" id="chatMessages"></div>
+
+        <div class="chat-empty" id="chatEmpty" style="display:none">
+          <div class="chat-empty-icon">✨</div>
+          <h2>Ask me about your farm</h2>
+          <p>I can answer questions using your real farm data — profit, batches, feed costs, expenses, and more.</p>
+          <div class="chat-suggestions">
+            <span class="chat-suggestion">How much profit did I make this month?</span>
+            <span class="chat-suggestion">Which batch is performing best?</span>
+            <span class="chat-suggestion">What are my biggest expenses?</span>
+            <span class="chat-suggestion">Which animals are ready for sale?</span>
+            <span class="chat-suggestion">How can I reduce feed costs?</span>
+          </div>
+        </div>
+
+        <div class="chat-input-bar">
+          <textarea id="chatInput" rows="1" placeholder="Ask about your farm…"></textarea>
+          <button class="chat-send-btn" id="sendBtn" aria-label="Send">➤</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="content" id="noFarmState" style="display:none">
+      <div class="empty-state">
+        <div class="empty-icon">🌱</div>
+        <h2>No farm yet</h2>
+        <p>You'll need a farm before the assistant has anything to work with.</p>
+      </div>
+    </div>
+  </main>
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<script src="/static/assistant.js"></script>
+</body>
+</html>
