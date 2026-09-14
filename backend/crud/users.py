@@ -179,3 +179,49 @@ def verify_otp(destination: str, code: str, purpose: str) -> bool:
 
     supabase.table("otp_codes").update({"attempts": attempts, "consumed": True}).eq("id", otp["id"]).execute()
     return True
+
+
+# ── Password reset tokens (email link-based reset — see services/password_reset_service.py) ──
+# Separate from the OTP-code path above, which stays exactly as it was and
+# is still what phone-number resets use — SMS was never wired to a real
+# provider, so this doesn't replace anything that was actually working.
+
+RESET_TOKEN_EXPIRE_MINUTES = 60
+
+
+def _hash_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode()).hexdigest()
+
+
+def create_reset_token(user_id: str, raw_token: str, ip_address: str | None, user_agent: str | None) -> dict:
+    row = {
+        "id": _new_id(),
+        "user_id": user_id,
+        "token_hash": _hash_token(raw_token),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES)).isoformat(),
+        "used_at": None,
+        "ip_address": (ip_address or "")[:100] or None,
+        "user_agent": (user_agent or "")[:250] or None,
+        "created_at": _now(),
+    }
+    res = supabase.table("password_reset_tokens").insert(row).execute()
+    return _one(res)
+
+
+def get_reset_token_by_raw(raw_token: str) -> Optional[dict]:
+    res = (
+        supabase.table("password_reset_tokens").select("*")
+        .eq("token_hash", _hash_token(raw_token)).limit(1).execute()
+    )
+    return _one(res)
+
+
+def mark_reset_token_used(token_id: str) -> None:
+    supabase.table("password_reset_tokens").update({"used_at": _now()}).eq("id", token_id).execute()
+
+
+def invalidate_user_reset_tokens(user_id: str) -> None:
+    """Called both when a new reset is requested (kills any older pending
+    link) and when a reset completes (belt-and-braces cleanup)."""
+    supabase.table("password_reset_tokens").update({"used_at": _now()}) \
+        .eq("user_id", user_id).is_("used_at", "null").execute()

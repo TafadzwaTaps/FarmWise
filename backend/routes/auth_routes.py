@@ -21,8 +21,9 @@ from core.auth import (
     decode_token,
     get_current_user,
 )
-from services.security import check as _rate_check, RateLimitExceeded
+from services.security import check as _rate_check, RateLimitExceeded, check_password_strength
 from services.notification_service import send_otp
+from services import password_reset_service
 from routes._deps import log
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -63,6 +64,24 @@ class PasswordResetConfirm(BaseModel):
     destination: str
     code: str
     new_password: str
+
+
+class ValidateResetTokenRequest(BaseModel):
+    token: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+class DirectResetRequest(BaseModel):
+    """Reset directly with your identifier — no email/link/code needed.
+    See services/password_reset_service.direct_reset() for the security
+    trade-off this accepts in exchange for not needing email delivery."""
+    identifier: str
+    new_password: str
+    confirm_password: str
 
 
 def _token_pair(user: dict, remember_me: bool = False, device_label: str | None = None) -> dict:
@@ -179,11 +198,20 @@ def logout_all(user: dict = Depends(get_current_user)):
 @router.post("/password-reset/request", status_code=status.HTTP_204_NO_CONTENT)
 def password_reset_request(data: PasswordResetRequest, request: Request):
     _rate_check("password-reset", request, max_calls=5, window_seconds=3600)
-    code = f"{__import__('secrets').randbelow(1_000_000):06d}"
-    crud.create_otp(data.destination, code, purpose="password_reset")
-    send_otp(data.destination, code)
-    # Always 204 regardless of whether the account exists — avoids
-    # leaking which emails/phones are registered.
+
+    destination = data.destination.strip()
+    if "@" in destination:
+        # Email — send a reset LINK, not a code (see services/password_reset_service.py).
+        ip = request.client.host if request.client else ""
+        ua = request.headers.get("user-agent", "")[:250]
+        password_reset_service.request_reset(destination, ip_address=ip, user_agent=ua)
+    else:
+        # Phone — unchanged OTP-code path.
+        code = f"{__import__('secrets').randbelow(1_000_000):06d}"
+        crud.create_otp(destination, code, purpose="password_reset")
+        send_otp(destination, code)
+    # Always 204 regardless of destination type or whether the account
+    # exists — avoids leaking which emails/phones are registered.
 
 
 @router.post("/password-reset/confirm", status_code=status.HTTP_204_NO_CONTENT)
@@ -199,6 +227,51 @@ def password_reset_confirm(data: PasswordResetConfirm):
         "locked_until": None,
     })
     crud.revoke_all_refresh_tokens(user["id"])  # invalidate existing sessions on password change
+
+
+@router.post("/validate-reset-token")
+def validate_reset_token(data: ValidateResetTokenRequest):
+    """Called by reset-password.html on load, to show a valid/expired
+    state before the user even types a new password."""
+    result = password_reset_service.validate_token(data.token)
+    return {"valid": result.get("valid", False), "reason": result.get("reason", "")}
+
+
+@router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+def reset_password(data: ResetPasswordRequest, request: Request):
+    """Completes a link-based (email) reset — what reset-password.html
+    calls on submit. Separate from /password-reset/confirm above, which
+    stays exactly as it was for the phone/OTP path."""
+    _rate_check("reset-password", request, max_calls=10, window_seconds=3600)
+
+    ok, reason = check_password_strength(data.new_password)
+    if not ok:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, reason)
+
+    result = password_reset_service.complete_reset(data.token, data.new_password)
+    if not result.get("ok"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, result.get("error", "Password reset failed."))
+
+
+@router.post("/reset-password-direct", status_code=status.HTTP_204_NO_CONTENT)
+def reset_password_direct(data: DirectResetRequest, request: Request):
+    """Reset directly using an email or phone number — no email/link/code
+    required. Matches WaziBot's reset-password-direct endpoint. Tightly
+    rate limited since this is the only real protection against someone
+    resetting an account they don't own."""
+    _rate_check("direct-reset", request, max_calls=5, window_seconds=3600)
+
+    if data.new_password != data.confirm_password:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Passwords do not match.")
+
+    ok, reason = check_password_strength(data.new_password)
+    if not ok:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, reason)
+
+    ip = request.client.host if request.client else ""
+    result = password_reset_service.direct_reset(data.identifier, data.new_password, ip_address=ip)
+    if not result.get("ok"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, result.get("error", "Reset failed."))
 
 
 @router.get("/me")

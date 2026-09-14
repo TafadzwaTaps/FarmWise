@@ -33,6 +33,10 @@ from crud.users import (  # noqa: F401
     revoke_all_refresh_tokens,
     create_otp,
     verify_otp,
+    create_reset_token,
+    get_reset_token_by_raw,
+    mark_reset_token_used,
+    invalidate_user_reset_tokens,
 )
 
 from crud.farms import (  # noqa: F401
@@ -100,4 +104,12 @@ from crud.assistant import (  # noqa: F401
     create_ai_message,
     list_ai_messages,
     clear_ai_history,
+)
+
+from crud.field_reports import (  # noqa: F401
+    create_report,
+    get_report,
+    list_reports,
+    add_feedback,
+    upload_media,
 )

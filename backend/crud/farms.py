@@ -33,12 +33,21 @@ def get_farm(farm_id: str) -> Optional[dict]:
 
 
 def list_farms_for_user(user_id: str) -> list[dict]:
-    member_res = supabase.table("farm_members").select("farm_id").eq("user_id", user_id).execute()
-    farm_ids = [m["farm_id"] for m in _many(member_res)]
+    member_res = supabase.table("farm_members").select("farm_id, role").eq("user_id", user_id).execute()
+    memberships = _many(member_res)
+    role_by_farm = {m["farm_id"]: m["role"] for m in memberships}
+    farm_ids = list(role_by_farm.keys())
     if not farm_ids:
         return []
     res = supabase.table("farms").select("*").in_("id", farm_ids).is_("deleted_at", "null").execute()
-    return _many(res)
+    farms = _many(res)
+    # The mobile/web app has no other way to know the caller's role on each
+    # farm — without this, every screen has to assume the most permissive
+    # role, which is exactly how a worker account ends up seeing full admin
+    # CRUD it has no server-side permission to actually use.
+    for farm in farms:
+        farm["my_role"] = role_by_farm.get(farm["id"])
+    return farms
 
 
 def update_farm(farm_id: str, fields: dict) -> Optional[dict]:
