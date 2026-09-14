@@ -90,4 +90,13 @@ def check_password_strength(password: str) -> tuple[bool, str]:
         return False, "Password must be at least 8 characters."
     if not re.search(r"[A-Za-z]", password) or not re.search(r"\d", password):
         return False, "Password should include both letters and numbers."
+    # bcrypt (core/auth.py hash_password/verify_password) only looks at the
+    # first 72 BYTES of a password and silently ignores the rest. Without
+    # this check, two different passwords sharing the same 72-byte prefix
+    # would both work, and a user typing/pasting a long passphrase would
+    # have no idea part of it is being ignored. Reject up front instead —
+    # loud and clear beats silently accepting less security than the user
+    # thinks they set.
+    if len(password.encode("utf-8")) > 72:
+        return False, "Password is too long (max 72 bytes — roughly 72 characters for plain text)."
     return True, ""

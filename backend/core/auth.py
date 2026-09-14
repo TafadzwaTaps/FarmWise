@@ -20,13 +20,27 @@ load_dotenv()
 
 SECRET_KEY = os.getenv("SECRET_KEY", "change_this_in_production_use_env_file")
 _WEAK_KEYS = {"change_this_in_production_use_env_file", "secret", "dev", "", "mysecret"}
-if SECRET_KEY in _WEAK_KEYS:
+_APP_ENV = os.getenv("APP_ENV", "development")
+
+if SECRET_KEY in _WEAK_KEYS or len(SECRET_KEY) < 32:
     import logging as _kal
-    _kal.getLogger("farmwise.security").critical(
-        "SECRET_KEY is unset or uses an insecure default value. "
-        "Set SECRET_KEY in Render env vars. "
-        'Generate: python -c "import secrets; print(secrets.token_hex(32))"'
+    _sec_log = _kal.getLogger("farmwise.security")
+    _msg = (
+        "SECRET_KEY is unset, uses an insecure default, or is shorter than "
+        "32 characters. Every access/refresh token in the app is signed "
+        "with this key — a weak or guessable one lets an attacker forge "
+        "valid tokens for any user.\n"
+        "  ➜  Set SECRET_KEY in Render → Environment.\n"
+        '  ➜  Generate one: python -c "import secrets; print(secrets.token_hex(32))"'
     )
+    if _APP_ENV == "production":
+        # Same treatment as a missing SUPABASE_KEY (core/db.py) — refuse to
+        # boot rather than silently sign every session with a guessable key.
+        _sec_log.critical("❌  STARTUP FAILURE — core/auth.py\n%s", _msg)
+        import sys as _sys_auth
+        _sys_auth.exit(1)
+    else:
+        _sec_log.warning("%s\n  (Not fatal outside production — set APP_ENV=production to enforce.)", _msg)
 ALGORITHM = "HS256"
 
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))

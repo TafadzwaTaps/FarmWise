@@ -77,6 +77,25 @@ IS_PRODUCTION = APP_ENV == "production"
 
 CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 
+if not CORS_ORIGINS:
+    if IS_PRODUCTION:
+        # allow_origins=["*"] combined with allow_credentials=True (below)
+        # is not a safe fallback: it's rejected by browsers per the CORS
+        # spec for credentialed requests, and on setups that don't enforce
+        # that strictly it would allow any site to make authenticated
+        # requests using a logged-in user's cookies/headers. Refuse to boot
+        # with an unconfigured production CORS policy rather than silently
+        # running with one that's either broken or wide open.
+        log.critical(
+            "❌  STARTUP FAILURE — CORS_ORIGINS is not set in a production "
+            "environment (APP_ENV=production). Set it in Render → "
+            "Environment to a comma-separated list of allowed frontend "
+            "origins, e.g. https://farmwise-hsps.onrender.com"
+        )
+        raise SystemExit(1)
+    else:
+        log.warning("CORS_ORIGINS not set — defaulting to '*' for local development only.")
+
 app = FastAPI(
     title=APP_NAME,
     version="2.0.0",

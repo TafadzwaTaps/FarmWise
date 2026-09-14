@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from jose import jwt
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 import crud
 from core.auth import (
@@ -105,6 +105,10 @@ def _token_pair(user: dict, remember_me: bool = False, device_label: str | None 
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
 def signup(data: SignupRequest, request: Request):
     _rate_check("signup", request, max_calls=10, window_seconds=3600)
+
+    ok, reason = check_password_strength(data.password)
+    if not ok:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, reason)
 
     if data.email and crud.get_user_by_email(data.email):
         raise HTTPException(status.HTTP_409_CONFLICT, "An account with this email already exists")
@@ -216,6 +220,10 @@ def password_reset_request(data: PasswordResetRequest, request: Request):
 
 @router.post("/password-reset/confirm", status_code=status.HTTP_204_NO_CONTENT)
 def password_reset_confirm(data: PasswordResetConfirm):
+    ok, reason = check_password_strength(data.new_password)
+    if not ok:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, reason)
+
     if not crud.verify_otp(data.destination, data.code, purpose="password_reset"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired code")
     user = crud.get_user_by_identifier(data.destination)

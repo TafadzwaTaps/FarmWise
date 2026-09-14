@@ -96,7 +96,15 @@ def record_mortality(farm_id: str, batch_id: str, data: MortalityCreate, _member
     payload = data.model_dump()
     payload["date"] = payload["date"].isoformat()
     record = crud.create_mortality_record(batch_id, payload)
-    crud.decrement_batch_quantity(batch, data.quantity)
+    try:
+        crud.decrement_batch_quantity(batch, data.quantity)
+    except ValueError:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This batch's stock just changed (likely another sale or mortality record "
+            "happening at the same time). The mortality record was saved — please refresh "
+            "to see the current count.",
+        )
     return record
 
 

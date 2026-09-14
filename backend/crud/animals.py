@@ -53,11 +53,39 @@ def update_batch(batch_id: str, fields: dict) -> Optional[dict]:
 
 
 def decrement_batch_quantity(batch: dict, amount: int) -> dict:
+    """Atomic, race-safe decrement.
+
+    The old version read `batch["quantity_current"]` (fetched moments
+    earlier by the caller) and wrote a plain UPDATE — a classic
+    check-then-act race: two concurrent sales/mortality records against
+    the same batch could both pass their "enough stock?" check against
+    the same stale value and both be allowed to proceed, oversubtracting
+    the batch's quantity (potentially below zero).
+
+    This version puts the check IN the UPDATE's WHERE clause
+    (`quantity_current >= amount`), which Postgres evaluates atomically
+    against the current row at write time, not a Python-side copy.
+    Concurrent requests are then serialized by the database itself:
+    whichever commits first wins, and the second one gets zero rows
+    back — that's what `updated is None` below means, and the caller
+    (routes/finance_routes.py, routes/animal_routes.py) turns it into a
+    409 so the user can refresh and see the real remaining count.
+    """
     new_quantity = batch["quantity_current"] - amount
-    fields = {"quantity_current": new_quantity}
+    fields = {"quantity_current": new_quantity, "updated_at": _now()}
     if new_quantity == 0:
         fields["status"] = "closed"
-    return update_batch(batch["id"], fields)
+    res = (
+        supabase.table("animal_batches")
+        .update(fields)
+        .eq("id", batch["id"])
+        .gte("quantity_current", amount)
+        .execute()
+    )
+    updated = _one(res)
+    if updated is None:
+        raise ValueError("insufficient_stock")
+    return updated
 
 
 # ── Mortality ────────────────────────────────────────────────────────────

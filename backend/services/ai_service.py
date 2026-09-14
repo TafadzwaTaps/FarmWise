@@ -137,7 +137,11 @@ def chat(farm_id: str, user_id: str, farm_name: str, currency: str, message: str
         res = httpx.post(
             url,
             headers={"x-goog-api-key": api_key, "content-type": "application/json"},
-            params={"key": api_key},  # some proxies/environments only honor the query param — send both
+            # Header-only auth (not also ?key=... in the URL): query-string
+            # secrets get written into proxy/server access logs, browser
+            # history if this were ever called client-side, and Render's
+            # own request logs. Google's Gemini API supports header auth
+            # for exactly this reason — no need to duplicate the key here.
             json={
                 "contents": contents,
                 "systemInstruction": {"parts": [{"text": system}]},

@@ -66,11 +66,21 @@ def create_sale(farm_id: str, data: SaleCreate, _member: dict = Depends(require_
         if batch is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
         if data.quantity > batch["quantity_current"]:
+            # Fast-path, friendly message for the common case — but this
+            # check alone isn't what prevents overselling under concurrent
+            # requests; the atomic decrement below is (see crud/animals.py).
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
                 f"Cannot sell {data.quantity} — only {batch['quantity_current']} remain in this batch",
             )
-        crud.decrement_batch_quantity(batch, data.quantity)
+        try:
+            crud.decrement_batch_quantity(batch, data.quantity)
+        except ValueError:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "This batch's stock just changed (likely another sale or mortality record "
+                "happening at the same time). Please refresh and try again.",
+            )
 
     payload = data.model_dump()
     payload["sale_date"] = payload["sale_date"].isoformat()
