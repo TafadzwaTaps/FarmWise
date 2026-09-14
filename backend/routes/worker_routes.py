@@ -9,7 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 import crud
-from core.auth import require_farm_role
+from core.auth import require_farm_role, get_current_user
+from routes._deps import audit
 
 router = APIRouter(prefix="/farms/{farm_id}/workers", tags=["Workers"])
 
@@ -85,13 +86,14 @@ def get_worker(farm_id: str, worker_id: str, _member: dict = Depends(require_far
 def update_worker(farm_id: str, worker_id: str, data: WorkerUpdate, _member: dict = Depends(require_farm_role(*_MANAGE_ROLES))):
     _get_worker_or_404(farm_id, worker_id)
     fields = {k: v for k, v in data.model_dump().items() if v is not None}
-    return crud.update_worker(worker_id, fields)
+    return crud.update_worker(farm_id, worker_id, fields)
 
 
 @router.delete("/{worker_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_worker(farm_id: str, worker_id: str, _member: dict = Depends(require_farm_role(*_MANAGE_ROLES))):
-    _get_worker_or_404(farm_id, worker_id)
-    crud.delete_worker(worker_id)
+def delete_worker(farm_id: str, worker_id: str, _member: dict = Depends(require_farm_role(*_MANAGE_ROLES)), user: dict = Depends(get_current_user)):
+    worker = _get_worker_or_404(farm_id, worker_id)
+    crud.delete_worker(farm_id, worker_id)
+    audit("worker_deleted", farm_id=farm_id, worker_id=worker_id, worker_name=worker.get("full_name"), by_user=user["user_id"])
 
 
 # ── Attendance ───────────────────────────────────────────────────────────

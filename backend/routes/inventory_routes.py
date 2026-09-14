@@ -63,7 +63,7 @@ def list_items(farm_id: str, low_stock_only: bool = False, _member: dict = Depen
 def update_item(farm_id: str, item_id: str, data: InventoryItemUpdate, _member: dict = Depends(require_farm_role(*_MANAGE_ROLES))):
     _get_item_or_404(farm_id, item_id)
     fields = {k: v for k, v in data.model_dump().items() if v is not None}
-    return crud.update_item(item_id, fields)
+    return crud.update_item(farm_id, item_id, fields)
 
 
 @router.post("/{item_id}/adjust")
@@ -72,10 +72,17 @@ def adjust_stock(farm_id: str, item_id: str, data: InventoryAdjustment, _member:
     item = _get_item_or_404(farm_id, item_id)
     if float(item["quantity_on_hand"]) + data.delta < 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Adjustment would drop stock below zero")
-    return crud.adjust_stock(item, data.delta)
+    try:
+        return crud.adjust_stock(farm_id, item, data.delta)
+    except ValueError:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This item's stock just changed (another adjustment happening at the same time). "
+            "Please refresh and try again.",
+        )
 
 
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_item(farm_id: str, item_id: str, _member: dict = Depends(require_farm_role(*_MANAGE_ROLES))):
     _get_item_or_404(farm_id, item_id)
-    crud.delete_item(item_id)
+    crud.delete_item(farm_id, item_id)

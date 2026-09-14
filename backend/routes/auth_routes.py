@@ -24,7 +24,7 @@ from core.auth import (
 from services.security import check as _rate_check, RateLimitExceeded, check_password_strength
 from services.notification_service import send_otp
 from services import password_reset_service
-from routes._deps import log
+from routes._deps import log, audit
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -144,6 +144,8 @@ def login(data: LoginRequest, request: Request):
     user = crud.get_user_by_identifier(data.identifier)
     if user is None or not verify_password(data.password, user["hashed_password"]):
         record_failed_login(ip, data.identifier)
+        if is_login_locked(ip, data.identifier):
+            audit("login_locked", identifier=data.identifier, ip=ip)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
 
     if not user.get("is_active", True):
@@ -279,7 +281,9 @@ def reset_password_direct(data: DirectResetRequest, request: Request):
     ip = request.client.host if request.client else ""
     result = password_reset_service.direct_reset(data.identifier, data.new_password, ip_address=ip)
     if not result.get("ok"):
+        audit("direct_reset_failed", identifier=data.identifier, ip=ip, reason=result.get("error"))
         raise HTTPException(status.HTTP_400_BAD_REQUEST, result.get("error", "Reset failed."))
+    audit("direct_reset_succeeded", identifier=data.identifier, ip=ip)
 
 
 @router.get("/me")

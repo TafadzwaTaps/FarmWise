@@ -26,7 +26,15 @@ router = APIRouter(prefix="/farms/{farm_id}/field-reports", tags=["Field Reports
 
 _MANAGE_ROLES = ("farmer", "farm_manager")
 MAX_MEDIA_BYTES = 25 * 1024 * 1024  # 25 MB per file
-ALLOWED_MEDIA_PREFIXES = ("image/", "video/")
+# An explicit allowlist, not a prefix match — "image/" would also let
+# "image/svg+xml" through, and SVG can embed <script>, making it a stored-
+# XSS vector if the "image" is ever rendered/opened directly from its
+# public Supabase Storage URL. Every entry here is a real photo/video
+# format with no active-content risk.
+ALLOWED_MEDIA_TYPES = {
+    "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif",
+    "video/mp4", "video/quicktime", "video/webm",
+}
 
 
 class MediaItem(BaseModel):
@@ -98,8 +106,11 @@ def get_report(farm_id: str, report_id: str, member: dict = Depends(require_farm
 
 @router.post("/media")
 async def upload_media(farm_id: str, file: UploadFile = File(...), _member: dict = Depends(require_farm_role())):
-    if not file.content_type or not file.content_type.startswith(ALLOWED_MEDIA_PREFIXES):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only image or video files are allowed")
+    if not file.content_type or file.content_type.lower() not in ALLOWED_MEDIA_TYPES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Only JPEG, PNG, WEBP, HEIC images or MP4/MOV/WEBM videos are allowed",
+        )
 
     file_bytes = await file.read()
     if len(file_bytes) > MAX_MEDIA_BYTES:
@@ -122,5 +133,5 @@ def add_feedback(farm_id: str, report_id: str, data: FeedbackCreate, member: dic
     report = crud.get_report(farm_id, report_id)
     if report is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Report not found")
-    updated = crud.add_feedback(report_id, data.feedback, reviewed_by=member["user_id"])
+    updated = crud.add_feedback(farm_id, report_id, data.feedback, reviewed_by=member["user_id"])
     return _enrich_with_worker_names([updated])[0]

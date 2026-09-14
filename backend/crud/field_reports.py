@@ -9,7 +9,6 @@ can't do (creating the bucket itself).
 
 from __future__ import annotations
 
-import mimetypes
 import uuid as _uuid
 from typing import Optional
 
@@ -67,7 +66,7 @@ def list_reports(farm_id: str, worker_id: Optional[str] = None, status_filter: O
     return _many(res)
 
 
-def add_feedback(report_id: str, manager_feedback: str, reviewed_by: str) -> Optional[dict]:
+def add_feedback(farm_id: str, report_id: str, manager_feedback: str, reviewed_by: str) -> Optional[dict]:
     fields = {
         "manager_feedback": manager_feedback,
         "status": "reviewed",
@@ -75,15 +74,28 @@ def add_feedback(report_id: str, manager_feedback: str, reviewed_by: str) -> Opt
         "reviewed_at": _now(),
         "updated_at": _now(),
     }
-    res = supabase.table("field_reports").update(fields).eq("id", report_id).execute()
+    res = supabase.table("field_reports").update(fields).eq("id", report_id).eq("farm_id", farm_id).execute()
     return _one(res)
 
 
 def upload_media(farm_id: str, file_bytes: bytes, filename: str, content_type: str) -> dict:
     """Uploads one photo/video to Supabase Storage and returns
     {"url": public_url, "type": "image"|"video"} ready to attach to a
-    report's media list."""
-    ext = (filename.rsplit(".", 1)[-1] if "." in filename else mimetypes.guess_extension(content_type) or "bin")
+    report's media list.
+
+    The storage extension is derived from `content_type` via a fixed
+    allowlist map, NOT from the client-supplied `filename` — a filename
+    like "a.png/../evil" would otherwise inject extra path segments into
+    `storage_path` below. `content_type` itself is validated against
+    ALLOWED_MEDIA_TYPES in routes/field_report_routes.py before this is
+    ever called, so only a known-safe set of extensions can appear here.
+    """
+    _EXT_BY_CONTENT_TYPE = {
+        "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+        "image/heic": "heic", "image/heif": "heif",
+        "video/mp4": "mp4", "video/quicktime": "mov", "video/webm": "webm",
+    }
+    ext = _EXT_BY_CONTENT_TYPE.get(content_type, "bin")
     storage_path = f"{farm_id}/{_uuid.uuid4()}.{ext}"
 
     supabase.storage.from_(MEDIA_BUCKET).upload(

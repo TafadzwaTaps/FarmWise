@@ -309,3 +309,180 @@ deliberately left for a dedicated follow-up rather than rushed. The app
 is **not** yet fully "production-ready" by the brief's own bar until
 those two items and the git-history credential rotation (FWA-015) are
 addressed.
+
+---
+
+# Phase 2 — Authentication, farm authorization, and security controls
+
+Scope for this pass: the remaining Phase 2 checklist items not already
+covered above — defense-in-depth on farm-scoped mutations, secure file
+upload validation, audit logging, and automated cross-farm-access tests.
+Same standard as Phase 1: every finding below was verified against the
+actual current source and, where fixed, actually exercised (either a
+live boot test or a real `pytest` run — see "Verification method" per
+item).
+
+### FWA-016 — Mutating crud functions for inventory/workers/field-reports didn't re-check `farm_id` in the query itself
+**Severity:** Medium (defense-in-depth, not a live exploit) · **Files:** `backend/crud/inventory.py`, `backend/crud/workers.py`, `backend/crud/field_reports.py` · **Status:** FIXED
+
+`update_item`, `delete_item`, `update_worker`, `delete_worker`, and
+`add_feedback` all took only the resource's own id (`item_id`,
+`worker_id`, `report_id`) with no `farm_id` in their `WHERE` clause. In
+every current call site the route layer already validates the resource
+belongs to the farm first (`_get_item_or_404`, `_get_worker_or_404`,
+`crud.get_report`), so this was **not** currently exploitable — but it
+meant correctness depended entirely on every future route remembering to
+call that check first, with nothing in the data layer itself enforcing
+it. This is exactly the shape of bug that's invisible in a diff and only
+surfaces months later when someone adds a new call site under time
+pressure.
+
+**Fix:** all five functions now take `farm_id` and filter on it directly
+in the Supabase query (`.eq("id", x).eq("farm_id", farm_id)`), matching
+the pattern already used for `get_item`/`get_worker`/`get_batch`. Updated
+the one call site each has accordingly.
+
+**Verification:** `py_compile`; traced each of the 5 changed call sites
+in `routes/inventory_routes.py`, `routes/worker_routes.py`,
+`routes/field_report_routes.py` to confirm the new `farm_id` argument is
+passed through.
+
+---
+
+### FWA-017 — Same check-then-act race as FWA-005, in inventory stock adjustment
+**Severity:** High · **File:** `backend/crud/inventory.py` (`adjust_stock`) · **Status:** FIXED
+
+Found while hardening the functions above: `adjust_stock` had the
+identical bug fixed in Phase 1 for `animal_batches` — it read
+`item["quantity_on_hand"]` from a Python dict fetched moments earlier,
+computed the new total, and wrote it back unconditionally. Two
+concurrent adjustments against the same item (e.g. two workers logging
+feed usage at the same time) could silently lose one of the two deltas.
+
+**Fix:** rather than guard on exact float equality of the quantity
+itself (risky to get precision-exact for arbitrary decimal values
+without a live DB to verify against), the fix uses `updated_at` as an
+optimistic-concurrency version check: `UPDATE ... WHERE id = ... AND
+farm_id = ... AND updated_at = <value just read>`. A concurrent writer
+changes `updated_at`, so a losing writer gets zero matched rows and
+retries against a freshly re-read row (up to 5 attempts) instead of
+silently dropping its delta. `routes/inventory_routes.py` now catches
+the exhausted-retries case and returns `409 Conflict`.
+
+**Verification:** `pytest tests/test_stock_concurrency.py` — 6 tests
+covering the batch-quantity fix from Phase 1 and this one: success on
+first try, a single lost race with successful retry, and exhausting all
+retries under sustained contention. All pass.
+
+---
+
+### FWA-018 — Field-report media upload accepted `image/svg+xml` (stored XSS vector)
+**Severity:** High · **File:** `backend/routes/field_report_routes.py`, `backend/crud/field_reports.py` · **Status:** FIXED
+
+The upload validation checked `content_type.startswith(("image/", "video/"))`
+— a prefix match, not an allowlist. `image/svg+xml` passes that check,
+and SVG files can embed `<script>` tags; since the uploaded file is
+later served back from a public Supabase Storage URL, this is a
+textbook stored-XSS vector (the classic "profile picture upload" SVG
+attack, here via field-report photos).
+
+A related, smaller issue in the same function: the storage file
+extension was derived from the client-supplied `filename` field
+(`filename.rsplit(".", 1)[-1]`), which is attacker-controlled and could
+inject extra path segments into the generated storage key (e.g. a
+filename like `a.png/../evil`).
+
+**Fix:** replaced the prefix check with an explicit allowlist of 8 real
+image/video MIME types (`ALLOWED_MEDIA_TYPES` in
+`field_report_routes.py`). Also changed `crud.upload_media`'s extension
+derivation to a fixed `content_type → extension` map instead of trusting
+the filename at all — the filename is no longer used for anything
+security-relevant.
+
+**Verification:** `py_compile`; manually confirmed `image/svg+xml` is
+absent from `ALLOWED_MEDIA_TYPES` and would now be rejected with `400`
+before reaching `crud.upload_media`.
+
+---
+
+### FWA-019 — No audit trail for sensitive actions
+**Severity:** Medium · **Files:** `backend/routes/_deps.py`, `backend/routes/farm_routes.py`, `backend/routes/worker_routes.py`, `backend/routes/auth_routes.py` · **Status:** FIXED (partial — see note)
+
+Confirmed no audit logging existed anywhere for destructive or
+security-sensitive actions (farm deletion, worker deletion, password
+resets outside the normal flow, login lockouts) — only ad-hoc `log.error`
+calls on failures, nothing structured or consistently applied on
+success.
+
+**Fix:** added a small `audit(event, **fields)` helper
+(`routes/_deps.py`) that emits a structured `AUDIT event=... key=value...`
+log line, and wired it into: farm deletion, farm settings updates,
+worker deletion, account lockout after repeated failed logins, and both
+outcomes of the direct (identifier-only, no-email-confirmation) password
+reset — the single riskiest auth endpoint in the app by its own code
+comment.
+
+**Why "partial":** this is log-based, not a persisted `audit_log`
+database table. A real table would support querying "show me everything
+user X did" after the fact, with retention and export — this pass's
+version relies on Render's log retention instead. Chose this
+deliberately over an unreviewed schema addition; the function is
+isolated so upgrading to a table later is a one-function change, not a
+call-site rewrite. Flagged as a recommended follow-up, not claimed as
+complete audit infrastructure.
+
+**Verification:** `py_compile`; traced each call site.
+
+---
+
+### FWA-020 — No automated tests for cross-farm access (explicitly requested by Phase 2)
+**Severity:** N/A (process gap) · **Status:** FIXED
+
+Built a `pytest` suite from scratch — `backend/tests/` — since none
+existed at all (Phase 1 already flagged this). `tests/conftest.py` sets
+the env vars needed for `main.py`'s now-stricter startup checks to pass,
+and provides fixtures for a real signed JWT (`make_token`) and an
+in-memory fake of the `farm_members` table
+(`membership_store`, monkeypatching only `crud.farms.get_membership` —
+everything above that, including the real `require_farm_role`
+dependency and real FastAPI routing, runs unmocked).
+
+`tests/test_farm_authorization.py` (8 tests) covers: no-token rejection;
+a token valid for farm A rejected on farm B via two different routers
+(animals, finance) with the underlying `crud` function asserted as
+*never called* for the rejected case, not just a non-200 status;
+non-member rejection on every farm; role-insufficient rejection
+(worker attempting a manager-only action) alongside the positive case
+(manager succeeding); a destructive-action check (farm deletion);
+and a request-body `farm_id` spoofing attempt to confirm the URL path
+parameter is what's actually authoritative.
+
+`tests/test_stock_concurrency.py` (6 tests) covers the FWA-005/FWA-017
+race-condition fixes, as described above.
+
+**Verification:** `pytest tests/ -v` → **14 passed**, 0 failed. Re-run
+against the final state of the codebase after all Phase 2 edits, not
+just once mid-way through.
+
+---
+
+## Phase 2 summary
+
+| ID | Severity | Status |
+|---|---|---|
+| FWA-016 (new) | Medium | **Fixed** |
+| FWA-017 (new) | High | **Fixed** |
+| FWA-018 (new) | High | **Fixed** |
+| FWA-019 (new) | Medium | **Fixed** (log-based; table upgrade recommended) |
+| FWA-020 (new) | — | **Fixed** — 14-test suite added and passing |
+
+**Still open after Phase 2:** rate limiting on `/auth/refresh` and
+`/auth/logout-all` (lower risk — refresh tokens aren't guessable — so
+deprioritized rather than skipped by oversight); a persisted
+`audit_log` table (see FWA-019); and everything already carried over
+from Phase 1 (FWA-006 batch cost allocation, FWA-015 credential
+rotation, FWA-007's idempotency-key gap, FWA-008/FWA-010). The route
+modules not touched this pass (`feed_routes.py`,
+`dashboard_routes.py`) haven't been re-checked for the FWA-016 pattern
+specifically — worth a quick pass before calling farm-authorization
+hardening fully complete.

@@ -51,7 +51,7 @@ frontend to talk to the API, because they're no longer different origins.
 | Route handlers | `async def` | `def` (sync — FastAPI runs these in a threadpool) |
 | Folder layout | `app/{core,models,schemas,repositories,services,api/v1}` | `{core,crud,routes,services,utils}` at the repo root |
 | Env vars | `DATABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | `SUPABASE_URL`, `SUPABASE_KEY` (matches WaziBot's `core/db.py`) |
-| Tests | `pytest` + async test client (12 tests) | Not ported — WaziBot's backend has no test suite either. Reintroducing tests here would mean mocking the Supabase client; flag if you want that added back. |
+| Tests | `pytest` + async test client (12 tests) | `pytest` suite reintroduced in `tests/` (14 tests) — see "Running the tests" below. |
 
 **What did NOT change:** every endpoint path, request/response field name,
 and business rule (account lockout, refresh-token rotation + revocation,
@@ -135,12 +135,43 @@ used.
 - Root Directory: `backend`
 - Build Command: `pip install -r requirements.txt`
 - Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-- Environment: `SUPABASE_URL`, `SUPABASE_KEY`, `SECRET_KEY` — `CORS_ORIGINS`
-  can stay empty unless something other than this app's own frontend calls
-  the API cross-origin.
+- Environment: `SUPABASE_URL`, `SUPABASE_KEY`, `SECRET_KEY`, `CORS_ORIGINS`,
+  `APP_ENV=production` — **all five are now required in production.**
+  As of the security audit pass, the app deliberately refuses to start in
+  production with a weak/missing `SECRET_KEY` or an unset `CORS_ORIGINS`
+  (see `AUDIT.md`, findings FWA-001 and FWA-013) rather than silently
+  booting insecurely. Set `CORS_ORIGINS` to your actual frontend origin,
+  e.g. `https://your-service.onrender.com` — it can no longer stay empty.
 
 After deploying, your Render URL *is* the app — `https://your-service.onrender.com/`
 loads the landing page directly, no separate frontend URL to keep straight.
+
+## Running the tests
+
+```bash
+pip install -r requirements.txt   # includes pytest
+pytest tests/ -v
+```
+
+No live Supabase project is needed — every test either mocks the specific
+`crud.*` function it depends on, or (for `tests/test_farm_authorization.py`)
+fakes only the `crud.farms.get_membership` DB read while exercising the
+real `require_farm_role` dependency and real routing end to end with
+actual signed JWTs. Current coverage:
+
+- `test_farm_authorization.py` — cross-farm access attempts (a token valid
+  for one farm must not read/write another farm's data via any router),
+  role-insufficient rejection, and a request-body `farm_id` spoofing
+  attempt to confirm the path parameter is always authoritative.
+- `test_stock_concurrency.py` — regression tests for the two
+  check-then-act race conditions fixed in `crud/animals.py` and
+  `crud/inventory.py` (see `AUDIT.md` FWA-005): both the success path and
+  the "lost the race, must not silently corrupt data" path.
+
+This is deliberately not full coverage of every endpoint yet — see
+`AUDIT.md`'s "Not done in this pass" note for what's still missing
+(notably: financial-accuracy tests once the batch cost-allocation rework
+lands, and auth edge cases like token expiry/refresh rotation).
 
 ## Endpoints (unchanged paths)
 

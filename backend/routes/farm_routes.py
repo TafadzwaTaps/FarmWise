@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 import crud
 from core.auth import get_current_user, require_farm_role
-from routes._deps import log
+from routes._deps import log, audit
 
 router = APIRouter(prefix="/farms", tags=["Farms"])
 
@@ -52,20 +52,23 @@ def get_farm(farm_id: str, _member: dict = Depends(require_farm_role())):
 
 
 @router.patch("/{farm_id}")
-def update_farm(farm_id: str, data: FarmUpdate, _member: dict = Depends(require_farm_role(*_MANAGE_ROLES))):
+def update_farm(farm_id: str, data: FarmUpdate, _member: dict = Depends(require_farm_role(*_MANAGE_ROLES)), user: dict = Depends(get_current_user)):
     farm = crud.get_farm(farm_id)
     if farm is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Farm not found")
     fields = {k: v for k, v in data.model_dump().items() if v is not None}
-    return crud.update_farm(farm_id, fields)
+    updated = crud.update_farm(farm_id, fields)
+    audit("farm_updated", farm_id=farm_id, by_user=user["user_id"], fields=list(fields.keys()))
+    return updated
 
 
 @router.delete("/{farm_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_farm(farm_id: str, _member: dict = Depends(require_farm_role(*_OWNER_ONLY))):
+def delete_farm(farm_id: str, _member: dict = Depends(require_farm_role(*_OWNER_ONLY)), user: dict = Depends(get_current_user)):
     farm = crud.get_farm(farm_id)
     if farm is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Farm not found")
     crud.soft_delete_farm(farm_id)  # soft delete — preserves historical records
+    audit("farm_deleted", farm_id=farm_id, farm_name=farm.get("name"), by_user=user["user_id"])
 
 
 @router.get("/{farm_id}/members")

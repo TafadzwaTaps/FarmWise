@@ -35,14 +35,14 @@ def list_workers(farm_id: str, status_filter: str | None = None) -> list[dict]:
     return _many(res)
 
 
-def update_worker(worker_id: str, fields: dict) -> Optional[dict]:
+def update_worker(farm_id: str, worker_id: str, fields: dict) -> Optional[dict]:
     fields = {**fields, "updated_at": _now()}
-    res = supabase.table("workers").update(fields).eq("id", worker_id).execute()
+    res = supabase.table("workers").update(fields).eq("id", worker_id).eq("farm_id", farm_id).execute()
     return _one(res)
 
 
-def delete_worker(worker_id: str) -> None:
-    supabase.table("workers").delete().eq("id", worker_id).execute()
+def delete_worker(farm_id: str, worker_id: str) -> None:
+    supabase.table("workers").delete().eq("id", worker_id).eq("farm_id", farm_id).execute()
 
 
 # ── Attendance ───────────────────────────────────────────────────────────
