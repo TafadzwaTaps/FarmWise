@@ -162,6 +162,9 @@
         <div class="field"><label for="expenseDate">Date</label><input id="expenseDate" type="date" required></div>
       </div>
       <div class="field"><label for="expenseVendor">Vendor <span style="font-weight:400">(optional)</span></label><input id="expenseVendor"></div>
+      <div class="field"><label for="expenseBatch">Attribute to batch <span style="font-weight:400">(optional — improves that batch's Profit tab accuracy)</span></label>
+        <select id="expenseBatch"><option value="">— Farm-wide overhead —</option></select>
+      </div>
       <div class="field"><label for="expenseNotes">Notes <span style="font-weight:400">(optional)</span></label><textarea id="expenseNotes" rows="2"></textarea></div>
       <div class="form-actions">
         <button type="button" class="btn btn--outline" data-close="expenseModal">Cancel</button>

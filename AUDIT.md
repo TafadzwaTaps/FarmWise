@@ -1016,3 +1016,152 @@ FWA-023 (Decimal precision, investigated and documented as low practical
 risk), idempotency on expenses/income/mortality, and the whole-farm
 finance summary's fixed 30-day window (only the AI context's batch list
 was bounded/filtered this phase, not the finance summary itself).
+
+---
+
+# Phase 6 — Frontend and API integration
+
+Scope: every `.js`/`.html` file in `frontend/` (2,407 lines of JS across
+8 pages), cross-checked against the real backend routes verified in
+Phases 1-5 — not assumed from the file names. Two systemic bugs found,
+both affecting every page, plus the frontend gaps left by Phase 4's new
+backend features having no UI yet.
+
+### FWA-025 — Hardcoded "$" ignored the farm's actual currency setting
+**Severity:** High · **Files:** `dashboard.js`, `animals.js`, `feed.js`, `finance.js`, `workers.js` · **Status:** FIXED
+
+`settings.js` already lets a farmer change their farm's currency to
+`ZWL`, `ZAR`, `ZMW`, or `KES` (confirmed the exact option list in
+`settings.html` rather than assuming) — but every other page's `money()`
+formatter hardcoded `'$' + ...`, ignoring that setting entirely. A
+farmer running their farm in ZAR or ZMW would see every dashboard
+figure, sale, expense, and payroll amount prefixed with the wrong
+currency symbol. The data was already available client-side — every
+page already fetches `/farms` on load and gets each farm's `currency`
+field back — it just was never used.
+
+**Fix:** each `money()` function now looks up the active farm's
+currency in a small symbol map (`USD $`, `ZAR R`, `ZWL Z$`, `ZMW ZK`,
+`KES KSh`, plus a few others for future-proofing), falling back to a
+plain code prefix (e.g. `"XYZ 12.50"`) for anything not in the map
+rather than guessing a symbol. `currentCurrency` is set once in each
+page's `init()` right after the active farm is resolved.
+
+**Verification:** `node --check` on all 5 files (Node 22, real syntax
+parse, not a guess) after both the `money()` change and the
+`currentCurrency` assignment; cross-checked the symbol map against
+`settings.html`'s literal `<option>` list to make sure every real
+option is covered — caught that `ZMW` was missing from the first pass
+of the map and added it before finishing.
+
+---
+
+### FWA-026 — Every page force-logged the user out on ANY error, not just an expired session
+**Severity:** High · **Files:** all 8 page JS files · **Status:** FIXED
+
+This is the more serious of the two. Every page's `init()` had:
+```js
+} catch (err) {
+  localStorage.removeItem('farmwise_token'); /* ...clear everything... */
+  window.location.href = '/login';
+}
+```
+with no check on *what* the error was — a plain `403` (e.g. a worker
+whose role doesn't cover a page — several exist after Phases 2/4's
+role restrictions), a `404`, a `500`, or a transient network blip
+during page load all triggered the exact same response as an actually
+expired token: wipe the session, force a fresh login. A worker with a
+completely valid, current session could get silently logged out just
+for navigating to a page their role doesn't include, or from an
+ordinary flaky connection.
+
+**Fix:** every page's shared `api()`/`apiGet()` helper now attaches the
+real HTTP status to the thrown error (`err.status = res.status`). Each
+`init()`'s catch block now only does the destructive logout for a real
+`401`; everything else calls a new `showLoadError(status)` helper that
+renders a friendly in-page message instead — "you don't have access to
+this page" for a `403`, a generic "something went wrong, try again"
+with a retry button otherwise — without touching the user's session at
+all.
+
+**Verification:** `node --check` on all 8 files; manually traced that
+`showLoadError` is defined before `init()` calls it in every file, and
+that the 401-vs-other branch structure is identical across all 8 (the
+same fix, not 8 slightly different ones that could drift).
+
+---
+
+### Phase 4 backend features had no frontend at all
+**Severity:** Medium · **Status:** FIXED
+
+Two things Phase 4 added to the backend were completely invisible in
+the web app:
+
+- **Per-batch profit** (`GET .../batches/{batch_id}/profit`) — the
+  actual headline deliverable of Phase 4 — had no UI anywhere. Added a
+  "Profit" tab to the batch detail modal (`animals.html`/`.js`),
+  showing revenue, total accumulated cost, cost of goods sold, remaining
+  inventory value, mortality loss (only shown if non-zero), and net
+  profit — plus the data-completeness note from FWA-006's
+  `feed_cost_incomplete`/`medication_records_missing_cost` flags when
+  they're set, so an incomplete number isn't shown as if it were
+  final. Gated to `farmer`/`farm_manager`/`accountant` (matching the
+  backend's `FINANCE_VIEW_ROLES`) — the tab doesn't even render for a
+  worker, consistent with FWA-024's principle of not showing UI for
+  data the API would block.
+- **`medication_records.cost`** and **`expenses.batch_id`** (both added
+  in the same migration) had no form fields — meaning every medication
+  record logged through the web app would have `cost: null` forever,
+  directly undermining the very profit numbers just added a UI for.
+  Added an optional "Cost" field to the medication form, and an
+  optional "Attribute to batch" dropdown to the expense form (reusing
+  the batch list the sale form already loads).
+
+**Verification:** `node --check` on `animals.js`/`finance.js`; HTML
+`<div>` open/close tag balance checked across all 14 HTML files (not
+just the 2 touched) to catch any accidental markup breakage.
+
+---
+
+### Other checks performed, no issues found
+- **Every API call path** in all 8 files cross-referenced against the
+  real backend routes verified across Phases 1-5 — no broken/mismatched
+  endpoints, no typos.
+- **Auth headers** — consistently attached via each page's shared `api()`
+  helper; nothing bypasses it.
+- **Form validation** — spot-checked `min`/`step`/`required` attributes
+  against backend Pydantic constraints (e.g. sale quantity `min="1"`
+  matching `Field(gt=0)`) — already correct, no drift found.
+- **Dashboard calculations** — `dashboard.js` does no independent
+  client-side math on financial figures; every number is a direct
+  passthrough of backend-computed values. The expense-by-category bar
+  chart's proportional widths and empty-state handling are both correct.
+- **AI assistant error handling** — was showing the same generic
+  "check your connection" message for a `429` rate-limit response as
+  for an actual network failure, which reads as "retry now" when the
+  correct action is "wait". Fixed to show the backend's real rate-limit
+  message when `err.status === 429`.
+- **Inventory/settings empty states** — already handled correctly
+  (empty grid states, "no farm yet" states) — no changes needed.
+
+---
+
+## Phase 6 summary
+
+| ID | Severity | Status |
+|---|---|---|
+| FWA-025 (new) | High | **Fixed** — currency-aware `money()` across 5 files |
+| FWA-026 (new) | High | **Fixed** — 401-only logout across all 8 files |
+| Batch profit UI | Medium | **Fixed** — new Profit tab, role-gated |
+| Medication cost / expense batch_id UI | Medium | **Fixed** — form fields added |
+| AI assistant 429 handling | Low | **Fixed** |
+
+**Not done in this pass, stated plainly:** this was a systematic review
+of API integration, error handling, and the two features Phase 4 left
+without UI — not a full visual/UX redesign pass. Mobile responsiveness
+CSS wasn't re-audited (no code changes were made to any `.css` file this
+phase, so no regression risk, but also no fresh verification beyond
+what an earlier session already fixed). No automated frontend tests
+exist (`node --check` verifies syntax, not behavior) — a real browser-
+based test suite (Playwright or similar) remains a reasonable follow-up
+if this app's frontend keeps growing.

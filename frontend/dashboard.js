@@ -46,13 +46,24 @@ function toggleLightMode() {
 
 async function apiGet(path, token) {
   const res = await fetch(API + path, { headers: { Authorization: 'Bearer ' + token } });
-  if (!res.ok) throw new Error('Request failed: ' + res.status);
+  if (!res.ok) {
+    const err = new Error('Request failed: ' + res.status);
+    err.status = res.status; // lets init()'s catch distinguish 401 from 403/404/5xx — see AUDIT.md
+    throw err;
+  }
   return res.json();
 }
 
+// Farm-wide currency setting (AUDIT.md — money() previously hardcoded '$'
+// regardless of what a farmer set in Settings). Set in init() once the
+// active farm is known; falls back to a plain code prefix for any
+// currency not in the small symbol map below, rather than guessing.
+const CURRENCY_SYMBOLS = { USD: '$', ZAR: 'R', ZWL: 'Z$', ZWG: 'ZiG ', ZMW: 'ZK ', KES: 'KSh ', NGN: '\u20a6', GHS: '\u20b5', UGX: 'USh ', TZS: 'TSh ', EUR: '\u20ac', GBP: '\u00a3' };
+let currentCurrency = 'USD';
 function money(n) {
+  const symbol = CURRENCY_SYMBOLS[currentCurrency] || (currentCurrency + ' ');
   const sign = n < 0 ? '-' : '';
-  return sign + '$' + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return sign + symbol + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function formatDate(iso) {
@@ -165,6 +176,26 @@ function renderFarmSwitcher(farms, activeFarm) {
   el.appendChild(select);
 }
 
+// AUDIT.md — shown instead of a forced logout when init() fails for a
+// reason other than an invalid session (see the catch block below).
+function showLoadError(status) {
+  const main = document.querySelector('.main');
+  if (!main) return;
+  const forbidden = status === 403;
+  const box = document.createElement('div');
+  box.className = 'content';
+  box.style.cssText = 'padding:48px 24px;text-align:center;';
+  box.innerHTML = `
+    <div style="font-size:2rem;margin-bottom:8px">${forbidden ? '\ud83d\udd12' : '\u26a0\ufe0f'}</div>
+    <h2 style="margin:0 0 8px">${forbidden ? "You don't have access to this page" : 'Something went wrong'}</h2>
+    <p style="opacity:.75;max-width:420px;margin:0 auto 16px">${forbidden
+      ? "Your role on this farm doesn't include access to this page. Ask a farm owner or manager if you think this is a mistake."
+      : 'Please check your connection and try again.'}</p>
+    <button class="btn btn--primary" onclick="location.reload()">Try again</button>
+  `;
+  main.appendChild(box);
+}
+
 async function init() {
   const token = getToken();
   if (!token) { window.location.href = '/login'; return; }
@@ -186,18 +217,28 @@ async function init() {
 
     const savedFarmId = localStorage.getItem('farmwise_active_farm_id');
     const activeFarm = farms.find(f => f.id === savedFarmId) || farms[0];
+    currentCurrency = activeFarm.currency || 'USD';
     renderFarmSwitcher(farms, activeFarm);
 
     const summary = await apiGet(`/farms/${activeFarm.id}/dashboard-summary`, token);
     renderDashboard(summary);
     document.getElementById('dashboardContent').style.display = 'block';
   } catch (err) {
-    // Token invalid/expired — send back to login.
-    localStorage.removeItem('farmwise_token');
-    localStorage.removeItem('farmwise_refresh');
-    localStorage.removeItem('farmwise_user');
-    sessionStorage.clear();
-    window.location.href = '/login';
+    // AUDIT.md: this used to unconditionally wipe the session and bounce to
+    // /login for ANY error here — including a transient network/server
+    // error, which forced a real, currently-valid session to log out for
+    // no good reason. Only an actually invalid/expired token (401) should
+    // do that; everything else gets a friendly in-page message instead.
+    if (err.status === 401) {
+      localStorage.removeItem('farmwise_token');
+      localStorage.removeItem('farmwise_refresh');
+      localStorage.removeItem('farmwise_user');
+      sessionStorage.clear();
+      window.location.href = '/login';
+      return;
+    }
+    console.error(err);
+    showLoadError(err.status);
   }
 }
 

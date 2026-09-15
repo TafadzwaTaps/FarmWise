@@ -59,11 +59,28 @@ async function api(path, { method = 'GET', body } = {}) {
   if (body) headers['Content-Type'] = 'application/json';
   const res = await fetch(API + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   let data = null; try { data = await res.json(); } catch (e) {}
-  if (!res.ok) throw new Error((data && (data.error?.message || data.detail)) || `Request failed (${res.status})`);
+  if (!res.ok) {
+    const err = new Error((data && (data.error?.message || data.detail)) || `Request failed (${res.status})`);
+    err.status = res.status; // lets callers distinguish 401 (session invalid) from 403/404/5xx (AUDIT.md — every page's init() used to treat ANY error the same as an expired session and force-logout, including a plain 403 permission error)
+    throw err;
+  }
   return data;
 }
 
-function money(n) { return '$' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+// Farm-wide currency setting (AUDIT.md — money() previously hardcoded '$'
+// regardless of what a farmer set in Settings; every currency figure on
+// this page showed the wrong symbol for any non-USD farm). Set in init()
+// once the active farm is known; falls back to a plain code prefix (e.g.
+// "ZWG 12.50") for any currency not in the small symbol map below, rather
+// than guessing a symbol.
+const CURRENCY_SYMBOLS = { USD: '$', ZAR: 'R', ZWL: 'Z$', ZWG: 'ZiG ', ZMW: 'ZK ', KES: 'KSh ', NGN: '₦', GHS: '₵', UGX: 'USh ', TZS: 'TSh ', EUR: '€', GBP: '£' };
+let currentCurrency = 'USD';
+let currentRole = null;
+const FINANCE_VIEW_ROLES = ['farmer', 'farm_manager', 'accountant']; // matches backend's FINANCE_VIEW_ROLES / _FINANCE_VIEW_ROLES — batch profit is financial data
+function money(n) {
+  const symbol = CURRENCY_SYMBOLS[currentCurrency] || (currentCurrency + ' ');
+  return symbol + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 function fmtDate(iso) { if (!iso) return '—'; return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }); }
 
 // ── Rendering ──────────────────────────────────────────────────────────
@@ -199,7 +216,47 @@ async function openDetail(batchId) {
   document.getElementById('medicationAlert').classList.remove('show');
 
   openModal('detailModal');
-  await Promise.all([loadMortality(batchId), loadMedication(batchId)]);
+
+  const profitTab = document.getElementById('profitTab');
+  const showProfit = FINANCE_VIEW_ROLES.includes(currentRole);
+  profitTab.style.display = showProfit ? '' : 'none';
+  // If a non-finance role had the Profit tab open from a previous batch
+  // (shouldn't happen since the tab is hidden for them, but defensive),
+  // fall back to the Mortality tab rather than leaving an empty pane active.
+  if (!showProfit && profitTab.classList.contains('active')) {
+    document.querySelector('.tab[data-tab="mortality"]').click();
+  }
+
+  const loads = [loadMortality(batchId), loadMedication(batchId)];
+  if (showProfit) loads.push(loadProfit(batchId));
+  await Promise.all(loads);
+}
+
+async function loadProfit(batchId) {
+  const el = document.getElementById('profitContent');
+  el.innerHTML = '<p class="panel-empty">Loading…</p>';
+  try {
+    const p = await api(`/farms/${farmId}/animals/batches/${batchId}/profit`);
+    const note = (p.feed_cost_incomplete || p.medication_records_missing_cost > 0)
+      ? `<p class="panel-empty" style="margin-top:8px">
+           ${p.feed_cost_incomplete ? 'Some feed consumed by this batch was never purchased/priced, so feed cost may be understated. ' : ''}
+           ${p.medication_records_missing_cost > 0 ? `${p.medication_records_missing_cost} medication record(s) have no cost logged, so medication cost may be understated.` : ''}
+         </p>`
+      : '';
+    el.innerHTML = `
+      <div class="record-list">
+        <div class="record-row"><div class="record-row-main">Revenue</div><span>${money(p.total_sales_revenue)}</span></div>
+        <div class="record-row"><div class="record-row-main">Total cost (purchase + feed + medication + allocated expenses)</div><span>${money(p.total_accumulated_cost)}</span></div>
+        <div class="record-row"><div class="record-row-main">Cost of goods sold (${p.quantity_sold} sold)</div><span>${money(p.cost_of_goods_sold)}</span></div>
+        <div class="record-row"><div class="record-row-main">Remaining inventory value (${p.quantity_current} on hand)</div><span>${money(p.remaining_inventory_value)}</span></div>
+        ${p.quantity_mortality > 0 ? `<div class="record-row"><div class="record-row-main">Mortality loss (${p.quantity_mortality} lost)</div><span>${money(p.mortality_loss)}</span></div>` : ''}
+        <div class="record-row"><div class="record-row-main" style="font-weight:700">Net profit</div><span style="font-weight:700">${money(p.net_profit)}</span></div>
+      </div>
+      ${note}
+    `;
+  } catch (err) {
+    el.innerHTML = '<p class="panel-empty">Could not load profit data for this batch.</p>';
+  }
 }
 
 async function loadMortality(batchId) {
@@ -226,7 +283,7 @@ async function loadMedication(batchId) {
     : records.map(r => `
         <div class="record-row">
           <div>
-            <div class="record-row-main">${r.name}</div>
+            <div class="record-row-main">${r.name}${r.cost != null ? ' · ' + money(r.cost) : ''}</div>
             <div class="record-row-sub">${r.type}${r.next_due_date ? ' · next due ' + fmtDate(r.next_due_date) : ''}</div>
           </div>
           <span class="record-row-date">${fmtDate(r.date_administered)}</span>
@@ -274,11 +331,13 @@ document.getElementById('medicationForm').addEventListener('submit', async (e) =
         name: document.getElementById('medName').value.trim(),
         date_administered: document.getElementById('medDateAdministered').value || null,
         next_due_date: document.getElementById('medNextDueDate').value || null,
+        cost: document.getElementById('medCost').value ? Number(document.getElementById('medCost').value) : null,
       },
     });
     document.getElementById('medName').value = '';
     document.getElementById('medDateAdministered').value = '';
     document.getElementById('medNextDueDate').value = '';
+    document.getElementById('medCost').value = '';
     await loadMedication(activeBatchId);
   } catch (err) {
     alertBox.textContent = err.message;
@@ -312,6 +371,26 @@ function renderFarmSwitcher(farms, activeFarm) {
   el.appendChild(select);
 }
 
+// AUDIT.md — shown instead of a forced logout when init() fails for a
+// reason other than an invalid session (see the catch block below).
+function showLoadError(status) {
+  const main = document.querySelector('.main');
+  if (!main) return;
+  const forbidden = status === 403;
+  const box = document.createElement('div');
+  box.className = 'content';
+  box.style.cssText = 'padding:48px 24px;text-align:center;';
+  box.innerHTML = `
+    <div style="font-size:2rem;margin-bottom:8px">${forbidden ? '\ud83d\udd12' : '\u26a0\ufe0f'}</div>
+    <h2 style="margin:0 0 8px">${forbidden ? "You don't have access to this page" : 'Something went wrong'}</h2>
+    <p style="opacity:.75;max-width:420px;margin:0 auto 16px">${forbidden
+      ? "Your role on this farm doesn't include access to this page. Ask a farm owner or manager if you think this is a mistake."
+      : 'Please check your connection and try again.'}</p>
+    <button class="btn btn--primary" onclick="location.reload()">Try again</button>
+  `;
+  main.appendChild(box);
+}
+
 async function init() {
   token = getToken();
   if (!token) { window.location.href = '/login'; return; }
@@ -333,17 +412,30 @@ async function init() {
 
     const savedFarmId = localStorage.getItem('farmwise_active_farm_id');
     const activeFarm = farms.find(f => f.id === savedFarmId) || farms[0];
+    currentCurrency = activeFarm.currency || 'USD';
+    currentRole = activeFarm.my_role || null;
     farmId = activeFarm.id;
     renderFarmSwitcher(farms, activeFarm);
 
     await loadBatches();
     document.getElementById('pageContent').style.display = 'block';
   } catch (err) {
-    localStorage.removeItem('farmwise_token');
-    localStorage.removeItem('farmwise_refresh');
-    localStorage.removeItem('farmwise_user');
-    sessionStorage.clear();
-    window.location.href = '/login';
+    // AUDIT.md: this used to unconditionally wipe the session and bounce to
+    // /login for ANY error here — including a plain 403 (e.g. a worker
+    // whose role doesn't include this page) or a transient network/server
+    // error, which forced a real, currently-valid session to log out for
+    // no good reason. Only an actually invalid/expired token (401) should
+    // do that; everything else gets a friendly in-page message instead.
+    if (err.status === 401) {
+      localStorage.removeItem('farmwise_token');
+      localStorage.removeItem('farmwise_refresh');
+      localStorage.removeItem('farmwise_user');
+      sessionStorage.clear();
+      window.location.href = '/login';
+      return;
+    }
+    console.error(err);
+    showLoadError(err.status);
   }
 }
 

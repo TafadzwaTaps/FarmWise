@@ -146,6 +146,7 @@
     <div class="tabs">
       <div class="tab active" data-tab="mortality">Mortality</div>
       <div class="tab" data-tab="medication">Medication</div>
+      <div class="tab" data-tab="profit" id="profitTab" style="display:none">Profit</div>
     </div>
 
     <div class="tab-panel active" id="tabMortality">
@@ -182,8 +183,13 @@
           <div class="field"><label for="medDateAdministered">Date administered <span style="font-weight:400">(optional)</span></label><input id="medDateAdministered" type="date"></div>
           <div class="field"><label for="medNextDueDate">Next due <span style="font-weight:400">(optional)</span></label><input id="medNextDueDate" type="date"></div>
         </div>
+        <div class="field"><label for="medCost">Cost <span style="font-weight:400">(optional — improves the batch's Profit tab accuracy)</span></label><input id="medCost" type="number" step="0.01" min="0"></div>
         <div class="form-actions"><button type="submit" class="btn btn--primary btn--sm">Log</button></div>
       </form>
+    </div>
+
+    <div class="tab-panel" id="tabProfit">
+      <div id="profitContent"><p class="panel-empty">Loading…</p></div>
     </div>
   </div>
 </div>

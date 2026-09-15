@@ -50,7 +50,11 @@ async function api(path, { method = 'GET', body } = {}) {
   const res = await fetch(API + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   if (res.status === 204) return null;
   let data = null; try { data = await res.json(); } catch (e) {}
-  if (!res.ok) throw new Error((data && (data.error?.message || data.detail)) || `Request failed (${res.status})`);
+  if (!res.ok) {
+    const err = new Error((data && (data.error?.message || data.detail)) || `Request failed (${res.status})`);
+    err.status = res.status; // lets callers distinguish 401 (session invalid) from 403/404/5xx (AUDIT.md — every page's init() used to treat ANY error the same as an expired session and force-logout, including a plain 403 permission error)
+    throw err;
+  }
   return data;
 }
 
@@ -139,7 +143,14 @@ async function sendMessage(text) {
     appendBubble('assistant', res.reply);
   } catch (err) {
     hideTyping();
-    appendBubble('assistant', "I couldn't send that — check your connection and try again.");
+    // AUDIT.md: this used to show the same generic message for every
+    // failure, including a 429 rate limit — which reads as a connection
+    // problem worth retrying immediately, when the actual fix is "wait".
+    // The backend's real message (services/security.py) already explains
+    // the hourly limit clearly, so just show it instead of overwriting it.
+    appendBubble('assistant', err.status === 429
+      ? (err.message || "You've reached the AI assistant's hourly message limit. Please try again in a bit.")
+      : "I couldn't send that — check your connection and try again.");
   } finally {
     sending = false;
     sendBtn.disabled = false;
@@ -176,6 +187,26 @@ document.getElementById('clearBtn').addEventListener('click', async () => {
 
 // ── Init ─────────────────────────────────────────────────────────────
 
+// AUDIT.md — shown instead of a forced logout when init() fails for a
+// reason other than an invalid session (see the catch block below).
+function showLoadError(status) {
+  const main = document.querySelector('.main');
+  if (!main) return;
+  const forbidden = status === 403;
+  const box = document.createElement('div');
+  box.className = 'content';
+  box.style.cssText = 'padding:48px 24px;text-align:center;';
+  box.innerHTML = `
+    <div style="font-size:2rem;margin-bottom:8px">${forbidden ? '\ud83d\udd12' : '\u26a0\ufe0f'}</div>
+    <h2 style="margin:0 0 8px">${forbidden ? "You don't have access to this page" : 'Something went wrong'}</h2>
+    <p style="opacity:.75;max-width:420px;margin:0 auto 16px">${forbidden
+      ? "Your role on this farm doesn't include access to this page. Ask a farm owner or manager if you think this is a mistake."
+      : 'Please check your connection and try again.'}</p>
+    <button class="btn btn--primary" onclick="location.reload()">Try again</button>
+  `;
+  main.appendChild(box);
+}
+
 async function init() {
   token = getToken();
   if (!token) { window.location.href = '/login'; return; }
@@ -200,11 +231,22 @@ async function init() {
     document.getElementById('pageContent').style.display = 'block';
     inputEl.focus();
   } catch (err) {
-    localStorage.removeItem('farmwise_token');
-    localStorage.removeItem('farmwise_refresh');
-    localStorage.removeItem('farmwise_user');
-    sessionStorage.clear();
-    window.location.href = '/login';
+    // AUDIT.md: this used to unconditionally wipe the session and bounce to
+    // /login for ANY error here — including a plain 403 (e.g. a worker
+    // whose role doesn't include this page) or a transient network/server
+    // error, which forced a real, currently-valid session to log out for
+    // no good reason. Only an actually invalid/expired token (401) should
+    // do that; everything else gets a friendly in-page message instead.
+    if (err.status === 401) {
+      localStorage.removeItem('farmwise_token');
+      localStorage.removeItem('farmwise_refresh');
+      localStorage.removeItem('farmwise_user');
+      sessionStorage.clear();
+      window.location.href = '/login';
+      return;
+    }
+    console.error(err);
+    showLoadError(err.status);
   }
 }
 
