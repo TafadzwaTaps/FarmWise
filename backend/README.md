@@ -182,12 +182,19 @@ actual signed JWTs. Current coverage:
   injection-defense instruction, and the async retry logic in
   `services/ai_service.chat()` (transient 5xx retried, auth errors not
   retried, persistent failure gives up after `MAX_RETRIES`).
+- `test_auth.py` — signup (including a regression test for FWA-027, a
+  validator that silently never fired for an omitted field), login
+  (success, wrong password, unknown identifier, inactive account),
+  account lockout (including FWA-029's DB-backed lockout fix), and JWT
+  expiry / malformed-token / token-type-confusion rejection.
+- `test_financial_validation.py` — boundary validation for expenses,
+  sales, feed purchases, and mortality quantities; a regression test for
+  FWA-030 (feed consumption's missing batch_id ownership check); and AI
+  usage-limit enforcement (429 after the hourly cap).
 
 This is deliberately not full coverage of every endpoint yet — see
-`AUDIT.md`'s "Not done in this pass" note for what's still missing
-(notably: auth edge cases like token expiry/refresh rotation, and
-idempotency protection on expenses/income/mortality beyond the sales
-endpoint it's currently wired into).
+`AUDIT.md`'s "remaining limitations" note (Phase 9) for what's still
+missing.
 
 ## Endpoints
 

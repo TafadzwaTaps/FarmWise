@@ -11,7 +11,7 @@ as crud/finance.py's profit_loss_summary, just one level higher.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 
 from core.db import supabase
 from crud._helpers import _many

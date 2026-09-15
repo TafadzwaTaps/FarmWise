@@ -10,7 +10,6 @@ from pydantic import BaseModel, Field
 
 import crud
 from core.auth import require_farm_role
-from routes._deps import log
 
 router = APIRouter(prefix="/farms/{farm_id}/animals", tags=["Animals"])
 

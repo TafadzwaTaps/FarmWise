@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from jose import jwt
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, model_validator
 
 import crud
 from core.auth import (
@@ -24,7 +24,7 @@ from core.auth import (
 from services.security import check as _rate_check, RateLimitExceeded, check_password_strength
 from services.notification_service import send_otp
 from services import password_reset_service
-from routes._deps import log, audit
+from routes._deps import audit
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -37,12 +37,22 @@ class SignupRequest(BaseModel):
     phone_number: str | None = None
     password: str
 
-    @field_validator("phone_number")
-    @classmethod
-    def require_email_or_phone(cls, v, info):
-        if not v and not info.data.get("email"):
+    @model_validator(mode="after")
+    def require_email_or_phone(self):
+        # AUDIT.md — this was a @field_validator("phone_number"), which
+        # Pydantic v2 only runs when phone_number is *explicitly* present
+        # in the request payload (validate_default defaults to False for
+        # field validators). Omitting BOTH email and phone_number entirely
+        # skipped this check completely and sailed through to
+        # crud.create_user with both as None — the users table has no
+        # CHECK constraint requiring either, so this could silently create
+        # an account with no way to ever log back in (login is by
+        # identifier = email or phone). A model_validator(mode="after")
+        # always runs against the fully-constructed model, regardless of
+        # which fields were explicitly supplied.
+        if not self.email and not self.phone_number:
             raise ValueError("Either email or phone_number is required")
-        return v
+        return self
 
 
 class LoginRequest(BaseModel):
@@ -142,8 +152,26 @@ def login(data: LoginRequest, request: Request):
         raise HTTPException(status.HTTP_423_LOCKED, "Account temporarily locked due to repeated failed logins.")
 
     user = crud.get_user_by_identifier(data.identifier)
+
+    # AUDIT.md: crud.is_locked/register_failed_login (DB-persisted, keyed by
+    # account only) were fully built — matching the users.failed_login_attempts
+    # / locked_until columns in the schema — but never actually called here.
+    # The only lockout enforcement was the in-memory check above, which is
+    # keyed by (ip, identifier): an attacker rotating source IPs (trivial —
+    # different mobile networks, a botnet, a proxy) resets that counter on
+    # every new IP and never gets locked out at all. The DB check below is
+    # per-account regardless of IP, survives redeploys, and works across
+    # multiple server instances if this app ever scales beyond one — kept
+    # alongside the IP-based check rather than replacing it, since the
+    # IP-based one still catches a single IP hammering many different
+    # existing usernames, which an account-keyed check doesn't cover.
+    if user is not None and crud.is_locked(user):
+        raise HTTPException(status.HTTP_423_LOCKED, "Account temporarily locked due to repeated failed logins.")
+
     if user is None or not verify_password(data.password, user["hashed_password"]):
         record_failed_login(ip, data.identifier)
+        if user is not None:
+            crud.register_failed_login(user)
         if is_login_locked(ip, data.identifier):
             audit("login_locked", identifier=data.identifier, ip=ip)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")

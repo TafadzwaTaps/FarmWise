@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from core.db import supabase
-from crud._helpers import _now, _new_id, _one, _many
+from crud._helpers import _now, _new_id, _one
 
 log = logging.getLogger("farmwise.crud.users")
 

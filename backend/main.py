@@ -17,6 +17,7 @@ import os
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -216,9 +217,18 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    # AUDIT.md (Phase 8): exc.errors() embeds the raw exception object in
+    # each error's ctx["error"] for any custom @field_validator/
+    # @model_validator that raises a plain ValueError (e.g. SignupRequest's
+    # require_email_or_phone). Passing that straight to JSONResponse (which
+    # uses plain json.dumps, not FastAPI's encoder) crashed with
+    # "Object of type ValueError is not JSON serializable" — turning what
+    # should have been a clean 422 into an unhandled 500 for every custom
+    # validator in the app, not just this one. jsonable_encoder is what
+    # FastAPI's own default handler uses internally for exactly this reason.
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"error": {"message": "Validation failed", "details": exc.errors()}},
+        content={"error": {"message": "Validation failed", "details": jsonable_encoder(exc.errors())}},
     )
 
 

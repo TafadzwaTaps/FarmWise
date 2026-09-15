@@ -4,7 +4,7 @@ Routes: /farms/{farm_id}/feed/purchases, .../consumption, .../cost-summary
 
 from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 import crud
@@ -47,6 +47,16 @@ def list_feed_purchases(farm_id: str, _member: dict = Depends(require_farm_role(
 
 @router.post("/consumption", status_code=201)
 def record_feed_consumption(farm_id: str, data: FeedConsumptionCreate, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
+    if data.batch_id and crud.get_batch(farm_id, data.batch_id) is None:
+        # AUDIT.md (Phase 8): unlike create_sale/create_expense, this never
+        # checked that a client-supplied batch_id actually belongs to this
+        # farm before inserting — a feed_consumption row could reference
+        # any existing batch_id anywhere (the FK only checks the row
+        # exists, not which farm it belongs to), polluting this farm's own
+        # feed-cost data with a foreign batch reference. Same principle as
+        # every other batch_id check in this codebase: never trust a
+        # client-supplied id without verifying it belongs to this farm.
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
     payload = data.model_dump()
     payload["date"] = payload["date"].isoformat()
     return crud.create_feed_consumption(farm_id, payload)

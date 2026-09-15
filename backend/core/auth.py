@@ -56,7 +56,7 @@ class _LoggingOAuth2PasswordBearer(OAuth2PasswordBearer):
         auth_header = request.headers.get("Authorization")
         try:
             return await super().__call__(request)
-        except HTTPException as exc:
+        except HTTPException:
             import logging as _al
             _al.getLogger("farmwise.auth").warning(
                 "AUTH FAILED: reason=missing_or_malformed_auth_header  path=%s  method=%s  header_present=%s",

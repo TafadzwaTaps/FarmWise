@@ -15,7 +15,7 @@ Visibility rule (enforced here, not just at the DB level):
     they can add feedback.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from pydantic import BaseModel, Field
 
 import crud

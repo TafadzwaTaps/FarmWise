@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 import crud
 from core.auth import get_current_user, require_farm_role
-from routes._deps import log, audit
+from routes._deps import audit
 
 router = APIRouter(prefix="/farms", tags=["Farms"])
 

@@ -8,7 +8,6 @@ going through supabase-py/PostgREST instead of raw SQL.
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Optional
 
 from core.db import supabase
 from crud._helpers import _now, _new_id, _one, _many

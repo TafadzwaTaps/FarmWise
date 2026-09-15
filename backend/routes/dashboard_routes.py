@@ -6,7 +6,6 @@ from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends
 
-import crud
 from crud.dashboard import dashboard_summary
 from core.auth import require_farm_role
 
