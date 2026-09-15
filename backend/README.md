@@ -114,6 +114,11 @@ matching how WaziBot manages its schema.
 Get your Supabase URL and **service_role** key from
 Project Settings → API, and set `SUPABASE_URL` / `SUPABASE_KEY` in `.env`.
 
+Then run `farmwise_indexes_and_constraints_migration.sql` (project root)
+once in the SQL Editor — additive indexes plus two integrity constraints
+the application code already assumes exist. See the comment at the top
+of that file and `AUDIT.md` (FWA-021/FWA-022) for what it does and why.
+
 ### Run locally
 
 ```bash

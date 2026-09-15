@@ -102,9 +102,9 @@ def delete_worker(farm_id: str, worker_id: str, _member: dict = Depends(require_
 def record_attendance(farm_id: str, worker_id: str, data: AttendanceCreate, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
     _get_worker_or_404(farm_id, worker_id)
 
-    # The DB has a UNIQUE(worker_id, date) constraint — checking first gives
-    # a clean 409 instead of letting a raw postgrest unique-violation surface
-    # as an unhandled 500 (the same failure mode the enum bug caused).
+    # Fast-path, friendly message for the common case — but this check
+    # alone doesn't prevent a duplicate under concurrent requests; the DB's
+    # UNIQUE(worker_id, date) constraint does (see crud/workers.py).
     existing = [a for a in crud.list_attendance(worker_id) if a["date"] == data.date.isoformat()]
     if existing:
         raise HTTPException(
@@ -114,7 +114,13 @@ def record_attendance(farm_id: str, worker_id: str, data: AttendanceCreate, _mem
 
     payload = data.model_dump()
     payload["date"] = payload["date"].isoformat()
-    return crud.record_attendance(worker_id, payload)
+    try:
+        return crud.record_attendance(worker_id, payload)
+    except ValueError:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Attendance for {data.date.isoformat()} is already recorded for this worker",
+        )
 
 
 @router.get("/{worker_id}/attendance")

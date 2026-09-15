@@ -486,3 +486,164 @@ modules not touched this pass (`feed_routes.py`,
 `dashboard_routes.py`) haven't been re-checked for the FWA-016 pattern
 specifically — worth a quick pass before calling farm-authorization
 hardening fully complete.
+
+---
+
+# Phase 3 — Supabase database integrity
+
+Scope: the actual schema (provided directly, not inferred) checked
+against every query pattern in `crud/*.py`. Verified with `grep` across
+every `.eq(...)` filter call site to build the real list of columns that
+matter, not a guessed one.
+
+### FWA-021 — Two constraints the application code already assumes exist, but the schema doesn't have
+**Severity:** High · **File:** schema (`farm_members`, `worker_attendance`) · **Status:** FIXED (migration + code)
+
+1. `routes/worker_routes.py`'s `record_attendance()` carried a comment
+   stating *"The DB has a UNIQUE(worker_id, date) constraint"* as the
+   real backstop behind its duplicate-attendance check. Checked the
+   actual schema: **no such constraint exists.** The route's own
+   pre-check (read all attendance rows, filter for the same date in
+   Python, reject if found) is a plain check-then-act race — the exact
+   bug class fixed twice already in this audit (FWA-005, FWA-017) — and
+   without the DB constraint, nothing catches it when the race is lost.
+2. `farm_members` has no `UNIQUE(farm_id, user_id)`. `crud.add_member`
+   doesn't guard against it either. Currently unreachable in practice
+   (the only call site is farm creation, adding the owner to a
+   brand-new farm that by definition has no existing members yet), but
+   nothing stops a future "invite a member" endpoint from creating
+   duplicate membership rows — possibly with two different roles for
+   the same person on the same farm, which `get_membership()`'s
+   `.limit(1)` would then resolve arbitrarily.
+
+**Fix:**
+- New migration `farmwise_indexes_and_constraints_migration.sql` adds
+  both constraints, with verification `SELECT`s to run first (a
+  `UNIQUE` add fails loudly against pre-existing duplicate rows rather
+  than silently corrupting anything — the migration explains how to
+  check and resolve that before altering).
+- `crud/workers.py`'s `record_attendance()` now also catches the
+  Postgres unique-violation (SQLSTATE `23505`) via `postgrest.exceptions.APIError`
+  and raises a clean `ValueError`, which `routes/worker_routes.py` turns
+  into `409`. The pre-check stays (fast, friendly message for the
+  common case); the DB constraint plus this catch is what actually
+  closes the race.
+
+**Verification:** `pytest tests/test_stock_concurrency.py` — 3 new
+tests: normal insert succeeds; a simulated `23505` from the DB is
+turned into a clean `ValueError` (not a raw 500); and a *different*
+DB error code is confirmed to propagate normally rather than being
+misreported as a duplicate. 17/17 tests pass overall.
+
+**Also confirmed, positively:** the schema's existing
+`CHECK (quantity_current >= 0)` on `animal_batches` and
+`CHECK (quantity_on_hand >= 0)` on `inventory_items` mean the atomic
+decrement/adjustment fixes from Phase 1/2 (FWA-005, FWA-017) have a
+database-level backstop even if the application logic had a bug — the
+DB itself would reject a negative write. Good defense in depth already
+in place; no action needed, just verified it's real.
+
+---
+
+### FWA-022 — No indexes anywhere except what PRIMARY KEY/UNIQUE columns create automatically
+**Severity:** Medium (performance, not correctness — grows into correctness-adjacent as login/lookup queries slow) · **File:** schema (all tables) · **Status:** FIXED
+
+The schema has zero `CREATE INDEX` statements. Every farm-scoped query
+(23 call sites across `crud/*.py`) filters on `farm_id` with a full
+sequential scan; the same is true for `worker_id`, `batch_id`,
+`user_id`, and — on **every single login attempt** —
+`users.email`/`users.phone_number` via `get_user_by_identifier()`. Not
+a problem at today's data volume; becomes a real, user-visible slowdown
+(and eventually a source of login timeouts) as each farm's transaction
+history and the overall user base grow, with no code change needed to
+trigger it — just time and usage.
+
+**Fix:** the same migration adds `CREATE INDEX IF NOT EXISTS` for every
+column actually used in a `.eq()` filter in the codebase (enumerated by
+grepping, not guessed) — `farm_id` on 11 tables, `user_id` on 3,
+`worker_id` on 2, `batch_id` on 4, plus `users.email`/`phone_number`
+(partial indexes, `WHERE ... IS NOT NULL`, since both are optional) and
+an `otp_codes` lookup index matching `verify_otp`'s actual query shape.
+All `IF NOT EXISTS` — safe to re-run, safe against a populated table.
+
+**Verification:** cross-checked the migration's index list against the
+`grep -rhoE '\.eq\("[a-z_]+"' crud/*.py` output line by line — every
+column that appears is covered; nothing in the migration is
+speculative. Can't execute this against your real Supabase project from
+here — verification of the actual `CREATE INDEX` runs is on you when
+you apply it; the SQL Editor will report any failure immediately
+(there shouldn't be any — every statement is additive and
+`IF NOT EXISTS`-guarded).
+
+---
+
+### FWA-023 — Monetary values are `numeric` (exact) in the database but converted to Python `float` everywhere they're read
+**Severity:** Medium · **Files:** `backend/crud/finance.py`, `backend/crud/inventory.py` · **Status:** OPEN — scoped out of this pass, documented
+
+The schema stores money correctly — `numeric` columns (arbitrary
+precision, no silent rounding) for `total_amount`, `amount`,
+`total_cost`, `unit_price`, `quantity_on_hand`, etc. But every place the
+app *reads* one of these back, it immediately does `float(...)`:
+`profit_loss_summary`, `feed_cost_summary`, `adjust_stock`'s quantity
+math, and the sale/expense/income creation functions that compute
+`total_amount`/`total_cost` before insert. This discards the exact-decimal
+guarantee the schema provides — Python `float` is IEEE-754 binary
+floating point, and summing many `float()`-converted currency values
+(as `profit_loss_summary` does across a farm's whole sales history) can
+accumulate small rounding errors. In practice, for realistic currency
+amounts (well under float64's ~15-17 significant digits), any single
+error is far below a cent and would be very hard to actually observe —
+but it's exactly the class of bug the master brief calls out
+explicitly ("Use Decimal or PostgreSQL numeric types for monetary
+values. Avoid floating-point arithmetic for money"), and "very hard to
+observe" is a bad property for a bug in a farmer's profit numbers to
+have.
+
+**Why not fixed in this pass:** converting this properly means
+switching every money computation in `crud/finance.py` and
+`crud/inventory.py` (and the values they hand back through
+`routes/finance_routes.py` and `services/ai_service.py`'s
+`:.2f`-formatted context) to Python's `Decimal`, and verifying
+`supabase-py`/`postgrest` actually round-trips `Decimal` through its
+JSON serialization correctly on both insert and read — I haven't
+confirmed that behavior and don't want to ship an unverified,
+wide-reaching change to every money computation in the app without
+testing it properly. This also overlaps directly with FWA-006's
+batch-cost-allocation rework (same files, same functions) — doing both
+together in one dedicated pass, with real test coverage for the
+`Decimal` round-trip specifically, is the safer path than patching
+this in isolation right now.
+
+**Recommendation for that follow-up:** confirm `postgrest-py`'s JSON
+encoder handles `Decimal` (may need a custom encoder or explicit
+`str()` conversion at the insert boundary), convert `crud/finance.py`
+and `crud/inventory.py`'s arithmetic to `Decimal`, and add tests
+asserting no precision is lost across an insert-then-read round trip
+for a value with an awkward decimal expansion (e.g. summing three
+`0.1`-style amounts and asserting the exact result, which is the
+classic case `float` gets wrong).
+
+---
+
+## Phase 3 summary
+
+| ID | Severity | Status |
+|---|---|---|
+| FWA-021 (new) | High | **Fixed** — migration + `record_attendance` DB-error handling |
+| FWA-022 (new) | Medium | **Fixed** — full index migration, grep-verified against actual query patterns |
+| FWA-023 (new) | Medium | Open — scoped into the same follow-up as FWA-006 (both touch `crud/finance.py`) |
+
+**New deliverable this phase:**
+`farmwise_indexes_and_constraints_migration.sql` — run it in the
+Supabase SQL Editor. It's additive-only and safe to run against your
+live, populated database, with the one caveat spelled out inside it:
+run the two duplicate-detection `SELECT`s before the two `ALTER TABLE
+... ADD CONSTRAINT` statements at the bottom, since (unlike everything
+else in the file) those two will fail loudly — not silently — if
+pre-existing duplicate rows violate the new constraint.
+
+**Still open overall, carried forward:** FWA-006 (batch cost
+allocation) and FWA-023 (Decimal precision) are now explicitly linked
+as one follow-up phase, since they share the same code. FWA-015
+(credential rotation) remains the other outstanding item from Phase 1
+that isn't a code change at all.

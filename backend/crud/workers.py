@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from typing import Optional
 
+from postgrest.exceptions import APIError
+
 from core.db import supabase
 from crud._helpers import _now, _new_id, _one, _many
+
+_UNIQUE_VIOLATION = "23505"  # Postgres SQLSTATE for a unique-constraint violation
 
 
 # ── Workers ──────────────────────────────────────────────────────────────
@@ -48,8 +52,22 @@ def delete_worker(farm_id: str, worker_id: str) -> None:
 # ── Attendance ───────────────────────────────────────────────────────────
 
 def record_attendance(worker_id: str, data: dict) -> dict:
+    """The route layer (routes/worker_routes.py) already does a friendly
+    pre-check for the common case, but a pre-check alone is a
+    check-then-act race — two concurrent submissions for the same
+    worker+date could both pass it. The real backstop is the database's
+    UNIQUE(worker_id, date) constraint (see
+    farmwise_indexes_and_constraints_migration.sql); this catches that
+    constraint firing and turns it into the same clean signal the
+    pre-check gives, instead of letting a raw postgrest 23505 surface as
+    an unhandled 500."""
     row = {"id": _new_id(), "worker_id": worker_id, "created_at": _now(), "updated_at": _now(), **data}
-    res = supabase.table("worker_attendance").insert(row).execute()
+    try:
+        res = supabase.table("worker_attendance").insert(row).execute()
+    except APIError as exc:
+        if exc.code == _UNIQUE_VIOLATION:
+            raise ValueError("duplicate_attendance") from exc
+        raise
     return _one(res)
 
 

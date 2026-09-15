@@ -147,3 +147,62 @@ def test_adjust_stock_gives_up_after_exhausting_retries(monkeypatch):
         assert False, "expected ValueError after exhausting retries"
     except ValueError:
         pass
+
+
+# ── worker_attendance (crud/workers.py) — DB-level duplicate backstop ───
+
+def test_record_attendance_succeeds_normally(monkeypatch):
+    import crud.workers as workers_crud
+    table_mock = MagicMock()
+    table_mock.insert.return_value.execute.return_value = _FakeResult(
+        [{"id": "a1", "worker_id": "w1", "date": "2026-01-01", "status": "present"}]
+    )
+    monkeypatch.setattr(workers_crud, "supabase", MagicMock(table=MagicMock(return_value=table_mock)))
+
+    result = workers_crud.record_attendance("w1", {"date": "2026-01-01", "status": "present"})
+    assert result["id"] == "a1"
+
+
+def test_record_attendance_raises_clean_error_on_db_unique_violation(monkeypatch):
+    """The application-level pre-check in routes/worker_routes.py is a
+    check-then-act race by itself — this proves the DB-level backstop
+    (the UNIQUE(worker_id, date) constraint added in
+    farmwise_indexes_and_constraints_migration.sql) is actually caught
+    and turned into a clean ValueError, not a raw 500-causing exception,
+    when two concurrent submissions both get past the pre-check."""
+    import crud.workers as workers_crud
+    from postgrest.exceptions import APIError
+
+    table_mock = MagicMock()
+    table_mock.insert.return_value.execute.side_effect = APIError(
+        {"code": "23505", "message": "duplicate key value violates unique constraint"}
+    )
+    monkeypatch.setattr(workers_crud, "supabase", MagicMock(table=MagicMock(return_value=table_mock)))
+
+    try:
+        workers_crud.record_attendance("w1", {"date": "2026-01-01", "status": "present"})
+        assert False, "expected ValueError for a unique-constraint violation"
+    except ValueError:
+        pass
+
+
+def test_record_attendance_reraises_unrelated_db_errors(monkeypatch):
+    """Only a 23505 (unique violation) should be swallowed into a
+    ValueError — any other DB error must propagate normally so it isn't
+    silently misreported as 'duplicate'."""
+    import crud.workers as workers_crud
+    from postgrest.exceptions import APIError
+
+    table_mock = MagicMock()
+    table_mock.insert.return_value.execute.side_effect = APIError(
+        {"code": "23503", "message": "foreign key violation"}
+    )
+    monkeypatch.setattr(workers_crud, "supabase", MagicMock(table=MagicMock(return_value=table_mock)))
+
+    try:
+        workers_crud.record_attendance("w1", {"date": "2026-01-01", "status": "present"})
+        assert False, "expected the original APIError to propagate"
+    except ValueError:
+        assert False, "a non-unique-violation error must not be reported as a duplicate"
+    except APIError:
+        pass
