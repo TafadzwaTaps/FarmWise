@@ -42,6 +42,9 @@ function toggleLightMode() {
 
 let token = null;
 let farmId = null;
+let farmOwnerId = null;
+let currentUserId = null;
+let isOwner = false;
 
 async function api(path, { method = 'GET', body } = {}) {
   const headers = { Authorization: 'Bearer ' + token };
@@ -124,19 +127,106 @@ document.getElementById('farmForm').addEventListener('submit', async (e) => {
 
 // ── Members ──────────────────────────────────────────────────────────
 
+const MEMBER_ROLES = ['worker', 'farm_manager', 'accountant', 'farmer'];
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s ?? '';
+  return div.innerHTML;
+}
+
 async function loadMembers() {
   const members = await api(`/farms/${farmId}/members`);
   const el = document.getElementById('membersList');
-  el.innerHTML = members.map(m => `
-    <div class="member-row">
+  el.innerHTML = members.map(m => {
+    const isThisMemberOwner = m.user_id === farmOwnerId;
+    // Only the farm's actual owner (isOwner, i.e. caller's role is
+    // "farmer") gets edit controls — and never on the owner's own row,
+    // which routes/farm_routes.py's _require_target_member_not_owner
+    // rejects server-side regardless of what this UI shows or hides.
+    const showControls = isOwner && !isThisMemberOwner;
+    return `
+    <div class="member-row" data-member-id="${m.id}">
       <div>
-        <div class="member-name">${m.user_full_name}</div>
-        ${m.user_email ? `<div class="member-email">${m.user_email}</div>` : ''}
+        <div class="member-name">${escapeHtml(m.user_full_name)}</div>
+        ${m.user_email ? `<div class="member-email">${escapeHtml(m.user_email)}</div>` : ''}
       </div>
-      <span class="member-role">${m.role.replace('_', ' ')}</span>
+      ${isThisMemberOwner
+        ? `<span class="member-owner-badge">Owner</span>`
+        : showControls
+          ? `<div class="member-actions">
+              <select class="member-role-select" data-member-id="${m.id}">
+                ${MEMBER_ROLES.map(r => `<option value="${r}" ${r === m.role ? 'selected' : ''}>${r.replace('_', ' ')}</option>`).join('')}
+              </select>
+              <button type="button" class="member-remove-btn" data-member-id="${m.id}" title="Remove from farm">✕</button>
+            </div>`
+          : `<span class="member-role">${m.role.replace('_', ' ')}</span>`
+      }
     </div>
-  `).join('');
+  `;
+  }).join('');
+
+  document.getElementById('inviteMemberSection').style.display = isOwner ? 'block' : 'none';
+
+  el.querySelectorAll('.member-role-select').forEach(select => {
+    select.addEventListener('change', async () => {
+      const alertBox = document.getElementById('membersAlert');
+      alertBox.classList.remove('show');
+      const memberId = select.dataset.memberId;
+      const newRole = select.value;
+      select.disabled = true;
+      try {
+        await api(`/farms/${farmId}/members/${memberId}`, { method: 'PATCH', body: { role: newRole } });
+        await loadMembers();
+      } catch (err) {
+        alertBox.textContent = err.message;
+        alertBox.classList.add('show');
+        await loadMembers(); // revert the select back to the real role
+      }
+    });
+  });
+
+  el.querySelectorAll('.member-remove-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const row = btn.closest('.member-row');
+      const name = row.querySelector('.member-name').textContent;
+      if (!confirm(`Remove ${name} from this farm?`)) return;
+      const alertBox = document.getElementById('membersAlert');
+      alertBox.classList.remove('show');
+      try {
+        await api(`/farms/${farmId}/members/${btn.dataset.memberId}`, { method: 'DELETE' });
+        await loadMembers();
+      } catch (err) {
+        alertBox.textContent = err.message;
+        alertBox.classList.add('show');
+      }
+    });
+  });
 }
+
+document.getElementById('inviteMemberForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const alertBox = document.getElementById('membersAlert');
+  alertBox.classList.remove('show');
+  const btn = document.getElementById('inviteSubmitBtn');
+  btn.disabled = true;
+  try {
+    await api(`/farms/${farmId}/members`, {
+      method: 'POST',
+      body: {
+        identifier: document.getElementById('inviteIdentifier').value.trim(),
+        role: document.getElementById('inviteRole').value,
+      },
+    });
+    document.getElementById('inviteMemberForm').reset();
+    await loadMembers();
+  } catch (err) {
+    alertBox.textContent = err.message;
+    alertBox.classList.add('show');
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 // ── Create additional farm ───────────────────────────────────────────
 
@@ -211,7 +301,6 @@ async function init() {
   try {
     const [me, farms] = await Promise.all([api('/auth/me'), api('/farms')]);
     document.getElementById('userGreeting').textContent = `Welcome back, ${me.full_name.split(' ')[0]}`;
-    document.getElementById('roleBadge').textContent = 'owner';
 
     if (farms.length === 0) {
       document.getElementById('farmName').textContent = 'No farm yet';
@@ -222,7 +311,11 @@ async function init() {
     const savedFarmId = localStorage.getItem('farmwise_active_farm_id');
     const activeFarm = farms.find(f => f.id === savedFarmId) || farms[0];
     farmId = activeFarm.id;
+    farmOwnerId = activeFarm.owner_id;
+    currentUserId = me.id;
+    isOwner = activeFarm.my_role === 'farmer';
     renderFarmSwitcher(farms, activeFarm);
+    document.getElementById('roleBadge').textContent = activeFarm.my_role || '';
 
     await Promise.all([loadFarmInfo(), loadMembers()]);
     document.getElementById('pageContent').style.display = 'block';

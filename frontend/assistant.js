@@ -58,6 +58,22 @@ async function api(path, { method = 'GET', body } = {}) {
   return data;
 }
 
+// Multipart upload doesn't set Content-Type itself — the browser adds the
+// correct multipart boundary automatically when the body is a FormData,
+// and setting it manually breaks that. Kept as a separate helper from
+// api() rather than overloading it, since the request shape (FormData,
+// no JSON body) is genuinely different, not just a variant.
+async function apiUpload(path, formData) {
+  const res = await fetch(API + path, { method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: formData });
+  let data = null; try { data = await res.json(); } catch (e) {}
+  if (!res.ok) {
+    const err = new Error((data && (data.error?.message || data.detail)) || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
 function renderFarmSwitcher(farms, activeFarm) {
   const el = document.getElementById('farmName');
   if (farms.length <= 1) {
@@ -88,19 +104,73 @@ const messagesEl = document.getElementById('chatMessages');
 const emptyEl = document.getElementById('chatEmpty');
 const inputEl = document.getElementById('chatInput');
 const sendBtn = document.getElementById('sendBtn');
+const attachBtn = document.getElementById('attachBtn');
+const photoInput = document.getElementById('photoInput');
+const photoPreview = document.getElementById('photoPreview');
+const photoPreviewImg = document.getElementById('photoPreviewImg');
+const removePhotoBtn = document.getElementById('removePhotoBtn');
+
+// Mirrors backend/routes/assistant_routes.py's ALLOWED_DIAGNOSIS_IMAGE_TYPES
+// and MAX_DIAGNOSIS_IMAGE_BYTES — checking client-side first gives an
+// instant, friendly error instead of a round trip just to find out the
+// same thing the server would have rejected anyway.
+const ALLOWED_DIAGNOSIS_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
+const MAX_DIAGNOSIS_BYTES = 8 * 1024 * 1024;
+let selectedPhoto = null; // File
 
 function scrollToBottom() {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-function appendBubble(role, text) {
+function appendBubble(role, text, imageDataUrl) {
   const bubble = document.createElement('div');
   bubble.className = `chat-msg chat-msg--${role}`;
-  bubble.textContent = text;
+  if (imageDataUrl) {
+    const img = document.createElement('img');
+    img.src = imageDataUrl;
+    img.alt = 'Attached photo';
+    bubble.appendChild(img);
+  }
+  const textNode = document.createElement('div');
+  textNode.textContent = text;
+  bubble.appendChild(textNode);
   messagesEl.appendChild(bubble);
   scrollToBottom();
   return bubble;
 }
+
+function clearSelectedPhoto() {
+  selectedPhoto = null;
+  photoInput.value = '';
+  photoPreview.style.display = 'none';
+  attachBtn.classList.remove('has-photo');
+}
+
+attachBtn.addEventListener('click', () => photoInput.click());
+
+photoInput.addEventListener('change', () => {
+  const file = photoInput.files && photoInput.files[0];
+  if (!file) return;
+  if (!ALLOWED_DIAGNOSIS_TYPES.includes(file.type)) {
+    alert('Only JPEG, PNG, WEBP, or HEIC photos are supported for diagnosis.');
+    photoInput.value = '';
+    return;
+  }
+  if (file.size > MAX_DIAGNOSIS_BYTES) {
+    alert('Photo too large (max 8 MB). Try a smaller photo or a lower camera resolution.');
+    photoInput.value = '';
+    return;
+  }
+  selectedPhoto = file;
+  const reader = new FileReader();
+  reader.onload = () => { photoPreviewImg.src = reader.result; };
+  reader.readAsDataURL(file);
+  photoPreview.style.display = 'flex';
+  attachBtn.classList.add('has-photo');
+  inputEl.focus();
+});
+
+removePhotoBtn.addEventListener('click', clearSelectedPhoto);
 
 function showTyping() {
   const el = document.createElement('div');
@@ -127,7 +197,9 @@ async function loadHistory() {
 }
 
 async function sendMessage(text) {
-  if (sending || !text.trim()) return;
+  if (sending || (!text.trim() && !selectedPhoto)) return;
+  if (selectedPhoto) { await sendPhotoDiagnosis(text); return; }
+
   sending = true;
   sendBtn.disabled = true;
   emptyEl.style.display = 'none';
@@ -154,6 +226,42 @@ async function sendMessage(text) {
   } finally {
     sending = false;
     sendBtn.disabled = false;
+    inputEl.focus();
+  }
+}
+
+async function sendPhotoDiagnosis(note) {
+  sending = true;
+  sendBtn.disabled = true;
+  attachBtn.disabled = true;
+  emptyEl.style.display = 'none';
+
+  const photo = selectedPhoto;
+  const photoDataUrl = photoPreviewImg.src;
+  appendBubble('user', note.trim() ? note.trim() : '[Photo submitted for diagnosis]', photoDataUrl);
+  inputEl.value = '';
+  inputEl.style.height = 'auto';
+  clearSelectedPhoto();
+  showTyping();
+
+  try {
+    const formData = new FormData();
+    formData.append('photo', photo);
+    if (note.trim()) formData.append('note', note.trim());
+    const res = await apiUpload(`/farms/${farmId}/assistant/diagnose`, formData);
+    hideTyping();
+    appendBubble('assistant', res.reply);
+  } catch (err) {
+    hideTyping();
+    appendBubble('assistant', err.status === 429
+      ? (err.message || "You've reached the photo-diagnosis hourly limit. Please try again in a bit, or use regular chat.")
+      : (err.status === 400 || err.status === 413
+          ? err.message
+          : "I couldn't process that photo — check your connection and try again."));
+  } finally {
+    sending = false;
+    sendBtn.disabled = false;
+    attachBtn.disabled = false;
     inputEl.focus();
   }
 }
@@ -214,7 +322,6 @@ async function init() {
   try {
     const [me, farms] = await Promise.all([api('/auth/me'), api('/farms')]);
     document.getElementById('userGreeting').textContent = `Welcome back, ${me.full_name.split(' ')[0]}`;
-    document.getElementById('roleBadge').textContent = 'owner';
 
     if (farms.length === 0) {
       document.getElementById('farmName').textContent = 'No farm yet';
@@ -226,6 +333,7 @@ async function init() {
     const activeFarm = farms.find(f => f.id === savedFarmId) || farms[0];
     farmId = activeFarm.id;
     renderFarmSwitcher(farms, activeFarm);
+    document.getElementById('roleBadge').textContent = activeFarm.my_role || '';
 
     await loadHistory();
     document.getElementById('pageContent').style.display = 'block';

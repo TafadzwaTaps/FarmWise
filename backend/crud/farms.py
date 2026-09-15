@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from typing import Optional
 
+from postgrest.exceptions import APIError
+
 from core.db import supabase
 from crud._helpers import _now, _new_id, _one, _many
+
+_UNIQUE_VIOLATION = "23505"  # Postgres SQLSTATE for a unique-constraint violation
 
 
 def create_farm(name: str, owner_id: str, location=None, size_hectares=None, description=None, currency="USD") -> dict:
@@ -63,6 +67,12 @@ def soft_delete_farm(farm_id: str) -> None:
 # ── Members ──────────────────────────────────────────────────────────────
 
 def add_member(farm_id: str, user_id: str, role: str, invited_by: str | None = None) -> dict:
+    """farm_create's call site (a brand-new farm has zero members) can
+    never hit the UNIQUE(farm_id, user_id) constraint — the invite path
+    added in routes/farm_routes.py can, when someone invites a user who's
+    already a member. Catch it and raise a clean ValueError rather than
+    letting a raw postgrest 23505 surface as an unhandled 500 (same
+    pattern as crud/workers.py's record_attendance)."""
     row = {
         "id": _new_id(),
         "farm_id": farm_id,
@@ -72,7 +82,12 @@ def add_member(farm_id: str, user_id: str, role: str, invited_by: str | None = N
         "created_at": _now(),
         "updated_at": _now(),
     }
-    res = supabase.table("farm_members").insert(row).execute()
+    try:
+        res = supabase.table("farm_members").insert(row).execute()
+    except APIError as exc:
+        if exc.code == _UNIQUE_VIOLATION:
+            raise ValueError("already_a_member") from exc
+        raise
     return _one(res)
 
 
@@ -91,3 +106,28 @@ def get_membership(farm_id: str, user_id: str) -> Optional[dict]:
 def list_members(farm_id: str) -> list[dict]:
     res = supabase.table("farm_members").select("*").eq("farm_id", farm_id).execute()
     return _many(res)
+
+
+def get_member_by_id(farm_id: str, member_id: str) -> Optional[dict]:
+    """member_id is farm_members.id (the membership row's own primary key),
+    NOT user_id — routes/farm_routes.py's URLs are .../members/{member_id}
+    for exactly this reason: a user can only ever have one membership row
+    per farm (enforced by the UNIQUE(farm_id, user_id) constraint added in
+    farmwise_indexes_and_constraints_migration.sql), so either id works to
+    look them up, but member_id matches what list_members() already
+    returns to the client without an extra round trip."""
+    res = (
+        supabase.table("farm_members").select("*")
+        .eq("id", member_id).eq("farm_id", farm_id).limit(1).execute()
+    )
+    return _one(res)
+
+
+def update_member_role(farm_id: str, member_id: str, role: str) -> Optional[dict]:
+    fields = {"role": role, "updated_at": _now()}
+    res = supabase.table("farm_members").update(fields).eq("id", member_id).eq("farm_id", farm_id).execute()
+    return _one(res)
+
+
+def remove_member(farm_id: str, member_id: str) -> None:
+    supabase.table("farm_members").delete().eq("id", member_id).eq("farm_id", farm_id).execute()

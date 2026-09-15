@@ -207,7 +207,6 @@ async function init() {
     ]);
 
     document.getElementById('userGreeting').textContent = `Welcome back, ${me.full_name.split(' ')[0]}`;
-    document.getElementById('roleBadge').textContent = 'owner';
 
     if (farms.length === 0) {
       document.getElementById('farmName').textContent = 'No farm yet';
@@ -219,6 +218,7 @@ async function init() {
     const activeFarm = farms.find(f => f.id === savedFarmId) || farms[0];
     currentCurrency = activeFarm.currency || 'USD';
     renderFarmSwitcher(farms, activeFarm);
+    document.getElementById('roleBadge').textContent = activeFarm.my_role || '';
 
     const summary = await apiGet(`/farms/${activeFarm.id}/dashboard-summary`, token);
     renderDashboard(summary);

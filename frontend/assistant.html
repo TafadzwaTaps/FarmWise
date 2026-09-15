@@ -27,7 +27,9 @@
       <a href="/finance" class="side-link">💰 Finance</a>
       <a href="/inventory" class="side-link">📦 Inventory</a>
       <a href="/workers" class="side-link">👷 Workers</a>
+      <a href="/field-reports" class="side-link">📋 Field Reports</a>
       <a href="/assistant" class="side-link active">✨ AI Assistant</a>
+      <a href="/export" class="side-link">⬇️ Export</a>
       <a href="/settings" class="side-link">⚙️ Settings</a>
     </nav>
     <button class="theme-toggle" onclick="toggleLightMode()" id="themeBtn">🌙 Toggle theme</button>
@@ -60,7 +62,7 @@
         <div class="chat-empty" id="chatEmpty" style="display:none">
           <div class="chat-empty-icon">✨</div>
           <h2>Ask me about your farm</h2>
-          <p>I can answer questions using your real farm data — profit, batches, feed costs, expenses, and more.</p>
+          <p>I can answer questions using your real farm data — profit, batches, feed costs, expenses, and more. You can also attach a photo of a sick or injured animal (📷 below) for a quick triage read.</p>
           <div class="chat-suggestions">
             <span class="chat-suggestion">How much profit did I make this month?</span>
             <span class="chat-suggestion">Which batch is performing best?</span>
@@ -71,8 +73,17 @@
         </div>
 
         <div class="chat-input-bar">
-          <textarea id="chatInput" rows="1" placeholder="Ask about your farm…"></textarea>
+          <button class="chat-attach-btn" id="attachBtn" type="button" aria-label="Attach a photo for diagnosis" title="Attach a photo of a sick or injured animal for AI triage">📷</button>
+          <input type="file" id="photoInput" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" style="display:none"/>
+          <textarea id="chatInput" rows="1" placeholder="Ask about your farm, or attach a photo of a sick animal…"></textarea>
           <button class="chat-send-btn" id="sendBtn" aria-label="Send">➤</button>
+        </div>
+        <div class="chat-photo-preview" id="photoPreview" style="display:none">
+          <img id="photoPreviewImg" alt="Selected photo"/>
+          <div class="chat-photo-preview-info">
+            <span>Photo attached — describe what you're seeing above, then send for a triage read.</span>
+            <button type="button" id="removePhotoBtn" aria-label="Remove photo">✕</button>
+          </div>
         </div>
       </div>
     </div>

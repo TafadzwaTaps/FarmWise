@@ -78,6 +78,20 @@ def add_feedback(farm_id: str, report_id: str, manager_feedback: str, reviewed_b
     return _one(res)
 
 
+def update_report(farm_id: str, report_id: str, fields: dict) -> Optional[dict]:
+    """Author-only, pending-only editing is enforced by the route layer
+    (routes/field_report_routes.py) — this function trusts its caller the
+    same way every other update_* function in this codebase does, and
+    still scopes the WHERE clause to farm_id as defense-in-depth."""
+    fields = {**fields, "updated_at": _now()}
+    res = supabase.table("field_reports").update(fields).eq("id", report_id).eq("farm_id", farm_id).execute()
+    return _one(res)
+
+
+def delete_report(farm_id: str, report_id: str) -> None:
+    supabase.table("field_reports").delete().eq("id", report_id).eq("farm_id", farm_id).execute()
+
+
 def upload_media(farm_id: str, file_bytes: bytes, filename: str, content_type: str) -> dict:
     """Uploads one photo/video to Supabase Storage and returns
     {"url": public_url, "type": "image"|"video"} ready to attach to a

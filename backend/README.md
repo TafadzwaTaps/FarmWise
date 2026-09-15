@@ -210,6 +210,7 @@ POST /api/v1/auth/password-reset/confirm
 
 POST/GET/PATCH/DELETE /api/v1/farms[/{farm_id}]
 GET  /api/v1/farms/{farm_id}/members
+POST/PATCH/DELETE /api/v1/farms/{farm_id}/members[/{member_id}]   (team management, added post-Phase-9 — AUDIT.md; farmer role only, owner protected)
 
 POST/GET /api/v1/farms/{farm_id}/animals/batches[/{batch_id}]
 POST/GET /api/v1/farms/{farm_id}/animals/batches/{batch_id}/mortality
@@ -227,11 +228,25 @@ GET      /api/v1/farms/{farm_id}/finance-summary
 
 POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/inventory[/{item_id}]
 POST /api/v1/farms/{farm_id}/inventory/{item_id}/adjust
+
+POST/GET       /api/v1/farms/{farm_id}/field-reports
+GET/PATCH/DELETE /api/v1/farms/{farm_id}/field-reports/{report_id}   (PATCH/DELETE added post-Phase-9 — AUDIT.md FWA-031; author-only, pending-only)
+POST /api/v1/farms/{farm_id}/field-reports/media
+POST /api/v1/farms/{farm_id}/field-reports/{report_id}/feedback
+
+POST/GET/DELETE /api/v1/farms/{farm_id}/assistant/chat, /history
+POST /api/v1/farms/{farm_id}/assistant/diagnose   (photo-based triage — Gemini vision, same free-tier model as chat)
 ```
+
+Web pages: `/dashboard`, `/animals`, `/feed`, `/finance`, `/inventory`,
+`/workers`, `/field-reports`, `/assistant`, `/export`, `/settings` — see
+`frontend/README.md` for the per-page JS/CSS convention.
 
 ## What's next
 
-Same as before — worker management, farm calendar/reminders, AI assistant
-endpoint, reports export, admin panel. Follow the pattern already
-established: one `crud/<domain>.py` + one `routes/<domain>_routes.py` per
-new domain, registered in `main.py`.
+Real remaining gaps, not a stale wishlist: ownership transfer (see
+AUDIT.md's "explicitly not built" note on team management) and a
+Decimal-precision pass on money arithmetic (AUDIT.md FWA-023) are the
+two most concrete next items. Follow the pattern already established
+for anything else: one `crud/<domain>.py` + one `routes/<domain>_routes.py`
+per new domain, registered in `main.py`.

@@ -194,6 +194,11 @@ def workers_page():
     return _html("workers.html")
 
 
+@app.get("/field-reports", include_in_schema=False)
+def field_reports_page():
+    return _html("field-reports.html")
+
+
 @app.get("/assistant", include_in_schema=False)
 def assistant_page():
     return _html("assistant.html")
@@ -202,6 +207,11 @@ def assistant_page():
 @app.get("/settings", include_in_schema=False)
 def settings_page():
     return _html("settings.html")
+
+
+@app.get("/export", include_in_schema=False)
+def export_page():
+    return _html("export.html")
 
 
 # ── Exception handlers ──────────────────────────────────────────────────

@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>
+  (function() {
+    try {
+      var t = localStorage.getItem('farmwise_theme');
+      if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    } catch (e) {}
+  })();
+</script>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Field Reports — FarmWise AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/static/field-reports.css"/>
+</head>
+<body>
+
+<div class="shell">
+  <aside class="sidebar">
+    <a href="/" class="logo">🌱 Farm<span>Wise</span></a>
+    <nav class="side-nav">
+      <a href="/dashboard" class="side-link">📊 Dashboard</a>
+      <a href="/animals" class="side-link">🐔 Animals</a>
+      <a href="/feed" class="side-link">🌾 Feed</a>
+      <a href="/finance" class="side-link">💰 Finance</a>
+      <a href="/inventory" class="side-link">📦 Inventory</a>
+      <a href="/workers" class="side-link">👷 Workers</a>
+      <a href="/field-reports" class="side-link active">📋 Field Reports</a>
+      <a href="/assistant" class="side-link">✨ AI Assistant</a>
+      <a href="/export" class="side-link">⬇️ Export</a>
+      <a href="/settings" class="side-link">⚙️ Settings</a>
+    </nav>
+    <button class="theme-toggle" onclick="toggleLightMode()" id="themeBtn">🌙 Toggle theme</button>
+    <button class="logout-btn" id="logoutBtn">Log out</button>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:14px">
+        <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">☰</button>
+        <div>
+          <div class="farm-name" id="farmName">Loading…</div>
+          <div class="farm-sub" id="userGreeting"></div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <span class="badge" id="roleBadge"></span>
+      </div>
+    </header>
+
+    <div class="content" id="pageContent" style="display:none">
+      <div class="toolbar">
+        <h1 id="pageTitle">Field Reports</h1>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <div class="status-tabs" id="statusTabs">
+            <span class="status-tab active" data-filter="">All</span>
+            <span class="status-tab" data-filter="pending">Pending</span>
+            <span class="status-tab" data-filter="reviewed">Reviewed</span>
+          </div>
+          <button class="btn btn--primary" id="newReportBtn">+ New report</button>
+        </div>
+      </div>
+
+      <div class="report-grid" id="reportGrid"></div>
+
+      <div class="empty-state" id="emptyState" style="display:none">
+        <div class="empty-icon">📋</div>
+        <h2 id="emptyTitle">No reports yet</h2>
+        <p id="emptyMessage">Log a note, observation, or photo of livestock/crops for your manager to review.</p>
+        <button class="btn btn--primary" id="emptyNewReportBtn">+ New report</button>
+      </div>
+    </div>
+
+    <div class="content" id="noFarmState" style="display:none">
+      <div class="empty-state">
+        <div class="empty-icon">🌱</div>
+        <h2>No farm yet</h2>
+        <p>You'll need a farm before you can submit field reports.</p>
+      </div>
+    </div>
+  </main>
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<!-- ═══════ Create report modal ═══════ -->
+<div class="modal-overlay" id="createModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>New field report</h2>
+      <button class="modal-close" data-close="createModal">✕</button>
+    </div>
+    <div class="alert alert--error" id="createAlert"></div>
+    <form id="createForm">
+      <div class="field">
+        <label for="reportType">Type</label>
+        <select id="reportType">
+          <option value="general">General</option>
+          <option value="livestock">Livestock</option>
+          <option value="crop">Crop</option>
+        </select>
+      </div>
+      <div class="field" id="batchField" style="display:none">
+        <label for="reportBatch">Batch</label>
+        <select id="reportBatch"></select>
+      </div>
+      <div class="field" id="subjectField">
+        <label for="reportSubject">Subject <span style="font-weight:400">(optional)</span></label>
+        <input id="reportSubject" placeholder="e.g. North field maize"/>
+      </div>
+      <div class="field">
+        <label for="reportNotes">Notes</label>
+        <textarea id="reportNotes" rows="4" placeholder="What did you observe?"></textarea>
+      </div>
+
+      <div class="field">
+        <label>Photos / videos <span style="font-weight:400">(optional)</span></label>
+        <div class="media-picker" id="mediaPicker">
+          <button type="button" class="media-add-btn" id="mediaAddBtn">+</button>
+        </div>
+        <div class="media-hint" id="mediaHint">JPEG, PNG, WEBP, HEIC, MP4, MOV, or WEBM — up to 25 MB each, 10 files max.</div>
+        <input type="file" id="mediaInput" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/quicktime,video/webm" style="display:none"/>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn--outline" data-close="createModal">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="createSubmitBtn">Submit report</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══════ Report detail modal ═══════ -->
+<div class="modal-overlay" id="detailModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="detailTitle">Report</h2>
+      <button class="modal-close" data-close="detailModal">✕</button>
+    </div>
+    <div class="alert alert--error" id="detailAlert"></div>
+    <div id="detailBody"></div>
+  </div>
+</div>
+
+<script src="/static/field-reports.js"></script>
+</body>
+</html>

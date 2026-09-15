@@ -300,7 +300,6 @@ async function init() {
   try {
     const [me, farms] = await Promise.all([api('/auth/me'), api('/farms')]);
     document.getElementById('userGreeting').textContent = `Welcome back, ${me.full_name.split(' ')[0]}`;
-    document.getElementById('roleBadge').textContent = 'owner';
 
     if (farms.length === 0) {
       document.getElementById('farmName').textContent = 'No farm yet';
@@ -312,6 +311,7 @@ async function init() {
     const activeFarm = farms.find(f => f.id === savedFarmId) || farms[0];
     farmId = activeFarm.id;
     renderFarmSwitcher(farms, activeFarm);
+    document.getElementById('roleBadge').textContent = activeFarm.my_role || '';
 
     await loadItems();
     document.getElementById('pageContent').style.display = 'block';

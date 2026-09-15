@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>
+  (function() {
+    try {
+      var t = localStorage.getItem('farmwise_theme');
+      if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    } catch (e) {}
+  })();
+</script>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Export — FarmWise AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/static/field-reports.css"/>
+</head>
+<body>
+
+<div class="shell">
+  <aside class="sidebar">
+    <a href="/" class="logo">🌱 Farm<span>Wise</span></a>
+    <nav class="side-nav">
+      <a href="/dashboard" class="side-link">📊 Dashboard</a>
+      <a href="/animals" class="side-link">🐔 Animals</a>
+      <a href="/feed" class="side-link">🌾 Feed</a>
+      <a href="/finance" class="side-link">💰 Finance</a>
+      <a href="/inventory" class="side-link">📦 Inventory</a>
+      <a href="/workers" class="side-link">👷 Workers</a>
+      <a href="/field-reports" class="side-link">📋 Field Reports</a>
+      <a href="/assistant" class="side-link">✨ AI Assistant</a>
+      <a href="/export" class="side-link active">⬇️ Export</a>
+      <a href="/settings" class="side-link">⚙️ Settings</a>
+    </nav>
+    <button class="theme-toggle" onclick="toggleLightMode()" id="themeBtn">🌙 Toggle theme</button>
+    <button class="logout-btn" id="logoutBtn">Log out</button>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:14px">
+        <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">☰</button>
+        <div>
+          <div class="farm-name" id="farmName">Loading…</div>
+          <div class="farm-sub" id="userGreeting"></div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <span class="badge" id="roleBadge"></span>
+      </div>
+    </header>
+
+    <div class="content" id="pageContent" style="display:none;max-width:640px">
+      <div class="toolbar">
+        <h1>Export reports</h1>
+      </div>
+      <p style="color:var(--text-dim);font-size:13px;margin-bottom:22px;line-height:1.6">
+        Download any report as a spreadsheet (CSV) or a printable document (PDF). Everything is generated
+        from your farm's current data — nothing is stored or sent anywhere else.
+      </p>
+
+      <div class="field">
+        <label for="reportSelect">Report</label>
+        <select id="reportSelect"></select>
+      </div>
+
+      <div class="alert alert--error" id="exportAlert"></div>
+      <div class="alert" id="exportEmptyAlert" style="background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)">
+        This report has no records yet — nothing to export.
+      </div>
+
+      <div class="form-actions" style="justify-content:flex-start;margin-top:10px">
+        <button class="btn btn--outline" id="exportCsvBtn">⬇️ Download CSV</button>
+        <button class="btn btn--primary" id="exportPdfBtn">🖨️ Save as PDF</button>
+      </div>
+    </div>
+
+    <div class="content" id="deniedState" style="display:none">
+      <div class="empty-state">
+        <div class="empty-icon">🔒</div>
+        <h2>You don't have access to this page</h2>
+        <p>Exporting reports is limited to farm owners and managers.</p>
+      </div>
+    </div>
+
+    <div class="content" id="noFarmState" style="display:none">
+      <div class="empty-state">
+        <div class="empty-icon">🌱</div>
+        <h2>No farm yet</h2>
+        <p>You'll need a farm before there's anything to export.</p>
+      </div>
+    </div>
+  </main>
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<script src="/static/export.js"></script>
+</body>
+</html>

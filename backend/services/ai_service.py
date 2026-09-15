@@ -33,6 +33,7 @@ Phase 5 (AUDIT.md) changes:
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
 import time
@@ -204,6 +205,78 @@ async def chat(farm_id: str, user_id: str, farm_name: str, currency: str, messag
     ]
     contents.append({"role": "user", "parts": [{"text": message}]})
 
+    return await _call_gemini(contents, system, farm_id, user_id, "ai_chat")
+
+
+def _diagnosis_system_prompt(farm_name: str) -> str:
+    return f"""You are the FarmWise AI assistant helping a farmer at "{farm_name}" understand a photo of a \
+possibly sick or injured animal. Look carefully at what's actually visible in the image and describe it \
+plainly before concluding anything.
+
+Structure your answer in this order, briefly:
+1. What you observe in the photo (posture, visible symptoms, condition of skin/feathers/coat/eyes, \
+   surroundings) — only what you can actually see, never invented details.
+2. Possible common causes for what you're seeing — plural, hedged ("could be", "consistent with"), \
+   never a single confident diagnosis. You are not certain and must not sound certain.
+3. Practical next steps the farmer can take now (isolation, hydration, basic care) where appropriate.
+4. Whether this looks urgent enough to need a veterinarian soon, and any signs that would make it an \
+   emergency (e.g. severe bleeding, difficulty breathing, inability to stand, sudden collapse).
+
+You are NOT a veterinarian and this is NOT a diagnosis — say so plainly near the end of every response. \
+Always recommend contacting a local veterinarian or livestock extension officer for anything serious, \
+uncertain, or if symptoms persist or worsen. If the photo doesn't show an animal, or isn't clear enough \
+to say anything useful, say so honestly rather than guessing. Be concise — the farmer is likely reading \
+this on a phone."""
+
+
+async def diagnose_image(
+    farm_id: str, user_id: str, farm_name: str, image_bytes: bytes, mime_type: str, note: str | None,
+) -> str:
+    """Photo-based animal health triage (not a diagnosis — see the system
+    prompt above). Deliberately a single-turn call with no conversation
+    history threaded in: each photo is its own independent look, which
+    keeps the request small and cheap. Uses the exact same free-tier
+    Gemini model as regular chat (gemini-2.5-flash is multimodal by
+    default) — this is not a separate, costlier product, just a
+    different shape of input to the same model. Images do consume more
+    of the free tier's quota per request than plain text, though, which
+    is why routes/assistant_routes.py rate-limits this endpoint more
+    tightly than regular chat.
+    """
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        log.warning("ai_diagnose_unconfigured farm_id=%s", farm_id)
+        return (
+            "The AI assistant isn't set up yet on this deployment — an administrator needs to add "
+            "a GEMINI_API_KEY in the backend's environment variables to turn this on. "
+            "Free keys are available at aistudio.google.com."
+        )
+
+    system = _diagnosis_system_prompt(farm_name)
+    parts: list[dict] = []
+    if note:
+        parts.append({"text": note})
+    parts.append({
+        "inline_data": {
+            "mime_type": mime_type,
+            "data": base64.b64encode(image_bytes).decode("ascii"),
+        },
+    })
+    contents = [{"role": "user", "parts": parts}]
+
+    return await _call_gemini(contents, system, farm_id, user_id, "ai_diagnose")
+
+
+async def _call_gemini(contents: list[dict], system: str, farm_id: str, user_id: str, log_event: str) -> str:
+    """Shared request/retry/error-handling core for both chat() and
+    diagnose_image() — extracted so the two share identical, already-
+    tested behavior (bounded retry on transient failures, auth errors
+    never retried, empty-candidate/safety-block handling) rather than
+    diverging over time. api_key presence is checked by each caller
+    before building its own contents/system (cheaper to bail before
+    doing that work), so this assumes a key is already set.
+    """
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
     model = os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
     url = GEMINI_API_URL.format(model=model)
     body = {
@@ -236,7 +309,7 @@ async def chat(farm_id: str, user_id: str, farm_name: str, currency: str, messag
                 # rather than a transport failure — worth a distinct message,
                 # and not something a retry would ever fix.
                 reason = (data.get("promptFeedback") or {}).get("blockReason")
-                log.warning("ai_chat_no_candidates farm_id=%s block_reason=%s", farm_id, reason)
+                log.warning("%s_no_candidates farm_id=%s block_reason=%s", log_event, farm_id, reason)
                 raise AssistantUnavailableError(f"No response candidates (blockReason={reason})")
 
             parts = candidates[0].get("content", {}).get("parts", [])
@@ -249,15 +322,15 @@ async def chat(farm_id: str, user_id: str, farm_name: str, currency: str, messag
             # the farmer typed (potentially sensitive to them, not useful
             # to a log line) or the model's output.
             log.info(
-                "ai_chat_ok farm_id=%s user_id=%s model=%s attempt=%d latency_ms=%d",
-                farm_id, user_id, model, attempt, int((time.monotonic() - started) * 1000),
+                "%s_ok farm_id=%s user_id=%s model=%s attempt=%d latency_ms=%d",
+                log_event, farm_id, user_id, model, attempt, int((time.monotonic() - started) * 1000),
             )
             return reply
 
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
-            log.error("ai_chat_http_error farm_id=%s status=%s attempt=%d body=%s",
-                       farm_id, status_code, attempt, exc.response.text[:300])
+            log.error("%s_http_error farm_id=%s status=%s attempt=%d body=%s",
+                       log_event, farm_id, status_code, attempt, exc.response.text[:300])
             if status_code in (401, 403):
                 raise AssistantUnavailableError(
                     f"Gemini rejected the API key (status {status_code}). Verify GEMINI_API_KEY in "
@@ -268,7 +341,7 @@ async def chat(farm_id: str, user_id: str, farm_name: str, currency: str, messag
                 raise AssistantUnavailableError(f"AI service returned {status_code}") from exc
             last_exc = exc
         except httpx.HTTPError as exc:
-            log.error("ai_chat_network_error farm_id=%s attempt=%d error=%s", farm_id, attempt, exc)
+            log.error("%s_network_error farm_id=%s attempt=%d error=%s", log_event, farm_id, attempt, exc)
             if attempt == MAX_RETRIES:
                 raise AssistantUnavailableError("Could not reach the AI service") from exc
             last_exc = exc

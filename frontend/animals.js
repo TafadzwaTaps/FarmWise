@@ -402,7 +402,6 @@ async function init() {
     ]);
 
     document.getElementById('userGreeting').textContent = `Welcome back, ${me.full_name.split(' ')[0]}`;
-    document.getElementById('roleBadge').textContent = 'owner';
 
     if (farms.length === 0) {
       document.getElementById('farmName').textContent = 'No farm yet';
@@ -416,6 +415,7 @@ async function init() {
     currentRole = activeFarm.my_role || null;
     farmId = activeFarm.id;
     renderFarmSwitcher(farms, activeFarm);
+    document.getElementById('roleBadge').textContent = activeFarm.my_role || '';
 
     await loadBatches();
     document.getElementById('pageContent').style.display = 'block';

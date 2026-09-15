@@ -48,6 +48,9 @@ from crud.farms import (  # noqa: F401
     add_member,
     get_membership,
     list_members,
+    get_member_by_id,
+    update_member_role,
+    remove_member,
 )
 
 from crud.animals import (  # noqa: F401
@@ -112,5 +115,7 @@ from crud.field_reports import (  # noqa: F401
     get_report,
     list_reports,
     add_feedback,
+    update_report,
+    delete_report,
     upload_media,
 )

@@ -202,6 +202,149 @@ async def test_chat_returns_setup_message_when_no_api_key(monkeypatch):
     assert "isn't set up yet" in reply
 
 
+# ── Photo diagnosis (diagnose_image) ─────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_diagnose_image_sends_inline_base64_and_returns_reply(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+    monkeypatch.setattr(ai_service, "RETRY_BACKOFF_SECONDS", 0)
+
+    success_data = {"candidates": [{"content": {"parts": [{"text": "This looks like mild conjunctivitis..."}]}}]}
+    captured_body = {}
+
+    class FakeAsyncClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, headers=None, json=None):
+            captured_body.update(json)
+            return _mock_response(200, success_data)
+
+    monkeypatch.setattr(ai_service.httpx, "AsyncClient", FakeAsyncClient)
+
+    reply = await ai_service.diagnose_image(
+        "f1", "u1", "Test Farm", b"fake-jpeg-bytes", "image/jpeg", "Chicken has been listless since morning",
+    )
+
+    assert reply == "This looks like mild conjunctivitis..."
+    # The image must be sent as inline_data with the correct mime type —
+    # not as raw bytes (which httpx/json can't serialize anyway) and not
+    # dropped silently.
+    sent_parts = captured_body["contents"][0]["parts"]
+    image_part = next(p for p in sent_parts if "inline_data" in p)
+    assert image_part["inline_data"]["mime_type"] == "image/jpeg"
+    import base64
+    assert base64.b64decode(image_part["inline_data"]["data"]) == b"fake-jpeg-bytes"
+    # The optional note must be included as its own text part.
+    assert any(p.get("text") == "Chicken has been listless since morning" for p in sent_parts)
+    # No conversation history is threaded in — each photo is independent.
+    assert len(captured_body["contents"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_diagnose_image_without_note_still_works(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+    monkeypatch.setattr(ai_service, "RETRY_BACKOFF_SECONDS", 0)
+    success_data = {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+
+    class FakeAsyncClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, *a, **k):
+            return _mock_response(200, success_data)
+
+    monkeypatch.setattr(ai_service.httpx, "AsyncClient", FakeAsyncClient)
+
+    reply = await ai_service.diagnose_image("f1", "u1", "Test Farm", b"bytes", "image/png", None)
+    assert reply == "ok"
+
+
+@pytest.mark.asyncio
+async def test_diagnose_image_returns_setup_message_when_no_api_key(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    reply = await ai_service.diagnose_image("f1", "u1", "Test Farm", b"bytes", "image/jpeg", None)
+    assert "isn't set up yet" in reply
+
+
+def test_diagnosis_system_prompt_includes_not_a_vet_disclaimer():
+    prompt = ai_service._diagnosis_system_prompt("Test Farm")
+    assert "NOT a veterinarian" in prompt
+    assert "NOT a diagnosis" in prompt
+    assert "emergency" in prompt.lower()
+
+
+# ── Route-level: content-type allowlist and rate limiting ───────────────
+
+def test_diagnose_route_rejects_disallowed_content_type(client, make_token, membership_store):
+    membership_store.add("f1", "u1", role="worker")
+    token = make_token("u1")
+    with patch("routes.assistant_routes.crud.get_farm", return_value={"id": "f1", "name": "F", "currency": "USD"}):
+        r = client.post(
+            "/api/v1/farms/f1/assistant/diagnose",
+            headers={"Authorization": f"Bearer {token}"},
+            files={"photo": ("evil.svg", b"<svg onload=alert(1)>", "image/svg+xml")},
+        )
+    assert r.status_code == 400
+
+
+def test_diagnose_route_accepts_allowed_image_and_returns_reply(client, make_token, membership_store):
+    membership_store.add("f1", "u1", role="worker")
+    token = make_token("u1")
+
+    async def _fake_diagnose(*a, **k):
+        return "This looks like a minor cut, keep it clean and monitor."
+
+    with patch("routes.assistant_routes.crud.get_farm", return_value={"id": "f1", "name": "F", "currency": "USD"}), \
+         patch("routes.assistant_routes.crud.create_ai_message", return_value={"created_at": "t"}), \
+         patch("routes.assistant_routes.ai_diagnose_image", _fake_diagnose):
+        r = client.post(
+            "/api/v1/farms/f1/assistant/diagnose",
+            headers={"Authorization": f"Bearer {token}"},
+            files={"photo": ("goat.jpg", b"fake-jpeg-data", "image/jpeg")},
+            data={"note": "limping on left leg"},
+        )
+    assert r.status_code == 200
+    assert "minor cut" in r.json()["reply"]
+
+
+def test_diagnose_route_rejects_oversized_photo(client, make_token, membership_store):
+    from routes.assistant_routes import MAX_DIAGNOSIS_IMAGE_BYTES
+    membership_store.add("f1", "u1", role="worker")
+    token = make_token("u1")
+    oversized = b"x" * (MAX_DIAGNOSIS_IMAGE_BYTES + 1)
+    with patch("routes.assistant_routes.crud.get_farm", return_value={"id": "f1", "name": "F", "currency": "USD"}):
+        r = client.post(
+            "/api/v1/farms/f1/assistant/diagnose",
+            headers={"Authorization": f"Bearer {token}"},
+            files={"photo": ("big.jpg", oversized, "image/jpeg")},
+        )
+    assert r.status_code == 413
+
+
+def test_diagnose_route_has_its_own_rate_limit_separate_from_chat(client, make_token, membership_store):
+    """Confirms the diagnosis endpoint doesn't share regular chat's 20/hour
+    budget — it has its own, tighter limit (10/hour) since photos are more
+    expensive against the free-tier quota."""
+    membership_store.add("f1", "u1", role="worker")
+    token = make_token("u1")
+
+    async def _fake_diagnose(*a, **k):
+        return "ok"
+
+    with patch("routes.assistant_routes.crud.get_farm", return_value={"id": "f1", "name": "F", "currency": "USD"}), \
+         patch("routes.assistant_routes.crud.create_ai_message", return_value={"created_at": "t"}), \
+         patch("routes.assistant_routes.ai_diagnose_image", _fake_diagnose):
+        last = None
+        for _ in range(11):  # limit is 10/hour per user
+            last = client.post(
+                "/api/v1/farms/f1/assistant/diagnose",
+                headers={"Authorization": f"Bearer {token}"},
+                files={"photo": ("x.jpg", b"data", "image/jpeg")},
+            )
+    assert last.status_code == 429
+
+
 # ── Route-level: role is actually passed through to the AI service ──────
 
 def test_route_passes_callers_role_to_ai_service(client, make_token, membership_store):

@@ -4,6 +4,7 @@ and photo/video of livestock and crops, reviewed by farm managers/owners.
 
 Routes: POST/GET /farms/{farm_id}/field-reports,
         GET /farms/{farm_id}/field-reports/{report_id},
+        PATCH/DELETE /farms/{farm_id}/field-reports/{report_id},
         POST /farms/{farm_id}/field-reports/media,
         POST /farms/{farm_id}/field-reports/{report_id}/feedback
 
@@ -54,6 +55,16 @@ class FeedbackCreate(BaseModel):
     feedback: str = Field(min_length=1, max_length=2000)
 
 
+class ReportUpdate(BaseModel):
+    """Every field optional — a PATCH, not a full replace. report_type is
+    deliberately NOT editable: changing it after the fact (e.g. livestock
+    -> general) would strand batch_id in a state the original ReportCreate
+    validation (report_type == "livestock" requires batch_id) never
+    checked for, since update doesn't re-run that cross-field rule."""
+    subject: str | None = Field(default=None, max_length=200)
+    notes: str | None = Field(default=None, min_length=1, max_length=4000)
+
+
 def _is_manager(role: str) -> bool:
     return role in _MANAGE_ROLES
 
@@ -102,6 +113,46 @@ def get_report(farm_id: str, report_id: str, member: dict = Depends(require_farm
     if not _is_manager(member["role"]) and report["worker_id"] != member["user_id"]:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You can only view your own reports")
     return _enrich_with_worker_names([report])[0]
+
+
+def _require_editable_own_report(farm_id: str, report_id: str, member: dict) -> dict:
+    """Shared guard for PATCH/DELETE: only the report's own author can
+    edit/delete it (a manager's feedback-granting power doesn't extend to
+    rewriting or removing someone else's submission), and only while it's
+    still 'pending' — editing or deleting a report after a manager has
+    already reviewed and left feedback on it would misrepresent what they
+    actually reviewed. This mirrors the restriction the mobile app's UI
+    already assumed existed (see services/endpoints/index.ts's comments
+    on update()/remove()) — it didn't, until now; this makes that
+    assumption actually true server-side, not just a client-side
+    convention that a direct API call could bypass."""
+    report = crud.get_report(farm_id, report_id)
+    if report is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Report not found")
+    if report["worker_id"] != member["user_id"]:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can only edit or delete your own reports")
+    if report["status"] != "pending":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This report has already been reviewed and can no longer be edited or deleted",
+        )
+    return report
+
+
+@router.patch("/{report_id}")
+def update_report(farm_id: str, report_id: str, data: ReportUpdate, member: dict = Depends(require_farm_role())):
+    _require_editable_own_report(farm_id, report_id, member)
+    fields = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing to update")
+    updated = crud.update_report(farm_id, report_id, fields)
+    return _enrich_with_worker_names([updated])[0]
+
+
+@router.delete("/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_report(farm_id: str, report_id: str, member: dict = Depends(require_farm_role())):
+    _require_editable_own_report(farm_id, report_id, member)
+    crud.delete_report(farm_id, report_id)
 
 
 @router.post("/media")

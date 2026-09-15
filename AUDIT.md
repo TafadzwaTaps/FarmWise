@@ -1499,3 +1499,214 @@ credential rotation (FWA-015) and the Decimal precision question
 (FWA-023) are the two items that most warrant attention before this
 handles real money for real farmers at scale, and Phase 7's deployment
 review was never done at all.
+
+---
+
+# Post-Phase-9 — Mobile feature parity + AI photo diagnosis
+
+Follow-up work after the nine-phase audit closed: bring the web app up
+to parity with the mobile app's feature set, and add AI photo-based
+triage for sick/injured animals. Scope was explicitly web-only; the
+mobile app itself was reviewed for comparison but not modified.
+
+### What was found already done
+- **AI photo diagnosis was already fully built on the backend** —
+  `POST /farms/{farm_id}/assistant/diagnose` (`services/ai_service.py`'s
+  `diagnose_image()`, `routes/assistant_routes.py`) from earlier work,
+  complete with its own tighter rate limit (10/hour/user, 30/hour/farm —
+  images use more of Gemini's free-tier quota than text), an explicit
+  not-a-vet disclaimer baked into the system prompt, and 8 passing
+  tests. Reuses the exact same free-tier `gemini-2.5-flash` model as
+  regular chat — no separate paid vision product, matching the "keep it
+  low-cost" requirement by construction, not by extra effort.
+- `frontend/field-reports.css` already existed, and every page's
+  sidebar already linked to `/field-reports` — but the actual
+  `.html`/`.js` were never built, so that link had been dead this whole
+  time.
+
+### FWA-031 — Field report edit/delete: mobile's client code called endpoints the backend never implemented
+**Severity:** Medium · **Files:** `backend/crud/field_reports.py`, `backend/routes/field_report_routes.py` · **Status:** FIXED
+
+The mobile app's `services/endpoints/index.ts` already has `update()`
+(PATCH) and `remove()` (DELETE) functions for field reports, with a
+code comment admitting the author never actually verified these routes
+existed server-side ("NOT independently verified against backend
+source"). They didn't. Any mobile user tapping "edit" or "delete" on
+their own pending report would get a 404 in production.
+
+**Fix:** added both, scoped correctly — only the report's own author,
+and only while `status == 'pending'` (editing/deleting after a manager
+has already left feedback would misrepresent what they reviewed). This
+makes real server-side what was previously only a client-side
+assumption; a direct API call could have bypassed it entirely before
+this fix, regardless of what the mobile UI restricted.
+
+**Verification:** `pytest tests/test_field_reports.py` — 7 tests
+covering author-allowed, non-author-denied, and already-reviewed-denied
+for both PATCH and DELETE, plus an empty-PATCH-body rejection. 83/83
+tests pass overall.
+
+### New web pages — closing the actual mobile/web feature gap
+- **`/field-reports`** (`field-reports.html`/`.js`) — the one page mobile
+  had that web genuinely lacked. Full CRUD: create (with a media
+  picker — photo/video upload reusing the existing
+  `POST .../field-reports/media` endpoint, immediate thumbnail preview,
+  remove-before-submit), list with status filtering, detail view with
+  manager feedback, and author-only edit/delete using FWA-031's new
+  endpoints. Role-gated identically to the backend: workers see only
+  their own reports and cannot give feedback; farmer/farm_manager see
+  everyone's and can.
+- **`/export`** (`export.html`/`.js`) — CSV/PDF export of all nine
+  report types mobile already offers (P&L summary, sales, expenses,
+  income, animal batches, inventory, feed purchases, feed consumption,
+  field reports), ported column-for-column from the mobile app's
+  `lib/exportReport.ts` + `app/export.tsx`. No new backend endpoints
+  needed — every report is built from data the app already fetches.
+  Generation mechanics are the natural web equivalents of mobile's
+  `expo-print`/`expo-sharing`: CSV via a `Blob` + temporary
+  `<a download>`; PDF via the same HTML mobile renders, printed through
+  a hidden `<iframe>` and `window.print()` (every modern browser's print
+  dialog offers "Save as PDF" natively — no PDF library needed). Gated
+  to farmer/farm_manager, matching mobile's `managerOnly: true` on this
+  feature exactly.
+- Added the `/export` nav link to all 8 existing pages' sidebars (it
+  only existed in the two new pages until this pass), and the
+  `GET /export` FastAPI route to serve it.
+
+### AI photo diagnosis — web UI
+`assistant.js`/`.html`: a 📷 attach button next to the chat input,
+client-side type/size validation mirroring the backend's exactly
+(JPEG/PNG/WEBP/HEIC, 8 MB cap — checked before the request goes out, so
+a bad file gets an instant answer instead of a round trip), a preview
+strip with a remove option, and a `sendPhotoDiagnosis()` path that
+posts `multipart/form-data` (`photo` + optional `note`) to the existing
+`/assistant/diagnose` endpoint. The photo renders inline in the user's
+own chat bubble for context; the reply renders as a normal assistant
+message, and both are preserved in conversation history exactly like
+regular chat (the backend already handles this — it stores a text
+marker for the photo turn since `ai_messages.content` is text-only, not
+a binary/image store, keeping this at zero storage cost beyond what
+already existed).
+
+### Explicitly not done, and why
+- **Team member management** (invite/remove/change role beyond the
+  farm-creation-time owner) — checked both the backend
+  (`routes/farm_routes.py` has only `GET /members`, no `PATCH`/`DELETE`/
+  invite endpoint) and mobile's endpoint layer (same gap). This is a
+  real, general product gap, but it isn't a mobile-vs-web parity gap —
+  mobile doesn't have this either, so porting a mobile feature can't
+  fix it. Flagged, not built, to stay scoped to the actual request.
+- **The mobile app's own `diagnose()` client function is stale.** Its
+  code comment explicitly says the endpoint "DOES NOT EXIST yet" and
+  proposes a different request shape (`{image_url, context}` JSON) than
+  what the real backend implements (multipart `photo` file + `note`
+  form field). This means mobile's photo-diagnosis feature is currently
+  broken in production — calling it would either 404 or send the wrong
+  request shape. Not fixed, since this pass was explicitly scoped to
+  web; flagged clearly since it's a real, currently-broken feature on
+  the other platform.
+
+### Verification summary
+`pytest tests/` — 83 passed (up from 76 before this round: +7 from
+`test_field_reports.py`). `pyflakes` — zero findings outside
+`crud/__init__.py`'s intentional re-exports. `node --check` — all 10
+frontend JS files (8 existing + 2 new) pass. Live boot test confirms
+both new routes (`/export`, `/field-reports`) return `200` and serve
+the correct HTML file. HTML `<div>` tag balance checked across all 16
+frontend HTML files (14 existing + 2 new) — all balanced.
+
+---
+
+# Post-Phase-9, continued — Team member management + a systemic role-badge bug
+
+### Team member management — the real gap named in the previous round, now built
+**Status:** FIXED
+
+`GET /farms/{farm_id}/members` existed; nothing else did, on either web
+or mobile. Added the missing operations:
+
+- **`POST /farms/{farm_id}/members`** — add an existing FarmWise user to
+  the farm by their email or phone number. Deliberately no separate
+  pending-invite/accept flow, no new table, no email-sending
+  integration: if nobody with that identifier has an account yet, the
+  caller is told to have that person sign up first and try again. This
+  keeps the feature to what the "add crud operations" ask actually
+  needed, using the `crud.add_member`/`get_user_by_identifier` functions
+  that already existed.
+- **`PATCH /farms/{farm_id}/members/{member_id}`** — change a member's
+  role among the four valid roles.
+- **`DELETE /farms/{farm_id}/members/{member_id}`** — remove a member.
+
+**Safeguard, load-bearing:** none of the three can ever target the
+farm's schema-level owner (`farms.owner_id`) — checked before any
+write, regardless of who's asking. Demoting or removing the owner
+through this endpoint would orphan the farm with no
+ownership-transfer flow to recover from it; that's a deliberately
+separate, bigger decision than "manage my team" and wasn't built here.
+All three restricted to the `farmer` role only — a `farm_manager` can
+run daily operations but not reshape who's on the team.
+
+**Duplicate-invite handling:** `crud.add_member` now catches the
+`UNIQUE(farm_id, user_id)` constraint (added in Phase 3's migration
+specifically anticipating this future endpoint — see that migration's
+own comment) and returns a clean `409`, not a raw postgrest error.
+
+**Frontend:** `settings.html`/`.js`'s existing (previously read-only)
+Team Members panel now shows, for the farm's owner viewing it: an
+inline role `<select>` and a remove button on every row except the
+owner's own (which shows a plain "Owner" badge, no controls — matching
+the backend's rule, not just hiding it), plus an "Add a team member"
+form. Everyone else still sees the same read-only list as before.
+
+**Verification:** `pytest tests/test_member_management.py` — 12 tests:
+owner can invite/change-role/remove; a `farm_manager` and a `worker`
+are both rejected (`403`) from all three; an unknown identifier, an
+already-a-member conflict, and an invalid role are each rejected with
+the right status; and — the two tests worth the most here — attempting
+to change the owner's own role or remove the owner is rejected with
+`400` before any write happens, verified by asserting the underlying
+`crud` function was never called, not just by checking the response
+code. 95/95 tests pass overall.
+
+### FWA-032 — Every page hardcoded the role badge to "owner"
+**Severity:** Low (display only, not a permission check) · **Files:** all 8 pre-existing page JS files · **Status:** FIXED
+
+Found while wiring up `settings.js`'s new owner-only UI, which needed
+to know the caller's real role — checked how the topbar's role badge
+got its value and found `document.getElementById('roleBadge').textContent = 'owner';`,
+a literal string, in every one of the 8 pages that existed before this
+round. A worker or accountant would see "owner" in their own topbar.
+Not a security issue (nothing was actually granted based on this label
+— every real permission check happens server-side, verified extensively
+throughout this whole audit), but a real, visible correctness bug.
+
+**Fix:** changed to `activeFarm.my_role || ''` in all 8 files, matching
+what `field-reports.js`/`export.js` (built in the previous round)
+already did correctly.
+
+**A second bug found while fixing the first:** in every one of those 8
+files, the corrected line was placed *before* `const activeFarm = ...`
+in the same function — a `const` temporal-dead-zone violation that
+would throw `ReferenceError: Cannot access 'activeFarm' before
+initialization` at runtime on every page load, silently caught by each
+page's own top-level `try/catch` and surfaced as a generic "something
+went wrong" error screen instead of the dashboard ever rendering.
+`node --check` (a syntax check) does not catch this class of bug — it's
+a runtime error, not a parse error. Caught by manually diffing each
+file's line numbers for the two statements after the mechanical
+find-and-replace, not by any automated tool; moved the corrected line
+to after `renderFarmSwitcher(farms, activeFarm)` in all 8 files and
+re-verified the ordering by line number, not just by re-running
+`node --check` (which would have passed either way).
+
+**Verification:** confirmed line-number ordering (`activeFarm` declared
+before the `roleBadge` line) in all 8 files by direct inspection after
+the fix; `node --check` re-run on all 10 frontend JS files as a
+baseline syntax check (necessary but not sufficient, as just noted).
+
+### Explicitly not built
+**Ownership transfer** — deliberately excluded from this round, as
+noted above. If the farm's actual owner needs to hand off the farm
+entirely (e.g. genuinely leaving the business), that's a distinct,
+higher-stakes operation deserving its own explicit confirmation flow,
+not a side effect of the team-management PATCH.

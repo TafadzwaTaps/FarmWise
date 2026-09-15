@@ -27,7 +27,9 @@
       <a href="/finance" class="side-link">💰 Finance</a>
       <a href="/inventory" class="side-link">📦 Inventory</a>
       <a href="/workers" class="side-link">👷 Workers</a>
+      <a href="/field-reports" class="side-link">📋 Field Reports</a>
       <a href="/assistant" class="side-link">✨ AI Assistant</a>
+      <a href="/export" class="side-link">⬇️ Export</a>
       <a href="/settings" class="side-link active">⚙️ Settings</a>
     </nav>
     <button class="theme-toggle" onclick="toggleLightMode()" id="themeBtn">🌙 Toggle theme</button>
@@ -78,7 +80,32 @@
 
       <div class="panel" style="margin-bottom:16px">
         <div class="section-title">Team members</div>
+        <div class="alert alert--error" id="membersAlert"></div>
         <div id="membersList"></div>
+
+        <div id="inviteMemberSection" style="display:none;margin-top:16px">
+          <div class="divider" style="height:1px;background:var(--border);margin:16px 0"></div>
+          <div style="font-size:13px;font-weight:700;margin-bottom:10px">Add a team member</div>
+          <p style="font-size:12px;color:var(--text-dim);margin-bottom:12px">
+            They'll need a FarmWise account already — enter the email or phone number they signed up with.
+          </p>
+          <form id="inviteMemberForm">
+            <div class="field-row">
+              <div class="field"><label for="inviteIdentifier">Email or phone</label><input id="inviteIdentifier" required/></div>
+              <div class="field"><label for="inviteRole">Role</label>
+                <select id="inviteRole">
+                  <option value="worker">Worker</option>
+                  <option value="farm_manager">Farm manager</option>
+                  <option value="accountant">Accountant</option>
+                  <option value="farmer">Farmer (full access)</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn--primary" id="inviteSubmitBtn">+ Add member</button>
+            </div>
+          </form>
+        </div>
       </div>
 
       <div class="panel" style="margin-bottom:16px">
