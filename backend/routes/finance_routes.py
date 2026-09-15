@@ -5,11 +5,12 @@ Routes: /farms/{farm_id}/sales, .../expenses, .../income, .../finance-summary
 from datetime import date
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Header, status
 from pydantic import BaseModel, Field
 
 import crud
 from core.auth import require_farm_role
+from services.security import check_idempotency_key, DuplicateSubmission
 
 router = APIRouter(prefix="/farms/{farm_id}", tags=["Finance"])
 
@@ -45,6 +46,7 @@ class ExpenseCreate(BaseModel):
     amount: float = Field(gt=0)
     expense_date: date
     vendor: str | None = None
+    batch_id: str | None = None  # optional — attribute this expense to a specific batch for cost allocation (AUDIT.md FWA-006); omitted, it stays farm-level overhead as before
     notes: str | None = None
 
 
@@ -58,9 +60,27 @@ class IncomeCreate(BaseModel):
 # ── Sales ────────────────────────────────────────────────────────────────
 
 @router.post("/sales", status_code=status.HTTP_201_CREATED)
-def create_sale(farm_id: str, data: SaleCreate, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
+def create_sale(
+    farm_id: str,
+    data: SaleCreate,
+    _member: dict = Depends(require_farm_role(*_RECORD_ROLES)),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
     """A sale against a batch decrements that batch's live quantity, same as
-    a mortality event — selling animals removes them from the flock."""
+    a mortality event — selling animals removes them from the flock.
+
+    Optional Idempotency-Key header (AUDIT.md FWA-007): a client can send
+    the same key on a retry (e.g. after a timeout) and get a clean 409
+    instead of a second sale being recorded. Omitting the header keeps
+    today's existing behavior exactly — this is opt-in, not required."""
+    try:
+        check_idempotency_key(f"create_sale:{farm_id}", idempotency_key)
+    except DuplicateSubmission:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This sale was already submitted a moment ago (duplicate request detected).",
+        )
+
     if data.batch_id:
         batch = crud.get_batch(farm_id, data.batch_id)
         if batch is None:
@@ -96,6 +116,10 @@ def list_sales(farm_id: str, _member: dict = Depends(require_farm_role())):
 
 @router.post("/expenses", status_code=status.HTTP_201_CREATED)
 def create_expense(farm_id: str, data: ExpenseCreate, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
+    if data.batch_id and crud.get_batch(farm_id, data.batch_id) is None:
+        # Same "never trust a client-supplied id without checking it belongs
+        # to this farm" principle as create_sale's batch_id check.
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
     payload = data.model_dump()
     payload["expense_date"] = payload["expense_date"].isoformat()
     return crud.create_expense(farm_id, payload)

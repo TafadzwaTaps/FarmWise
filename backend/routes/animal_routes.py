@@ -17,6 +17,7 @@ router = APIRouter(prefix="/farms/{farm_id}/animals", tags=["Animals"])
 # Workers can log day-to-day events (mortality, medication) but not create/delete batches.
 _MANAGE_ROLES = ("farmer", "farm_manager")
 _RECORD_ROLES = ("farmer", "farm_manager", "worker")
+_FINANCE_VIEW_ROLES = ("farmer", "farm_manager", "accountant")  # matches finance_routes.py — batch cost/profit is financial data, not a worker-facing view
 
 Species = Literal[
     "chicken_layer", "chicken_broiler", "pig", "cattle", "goat", "sheep",
@@ -55,6 +56,7 @@ class MedicationCreate(BaseModel):
     next_due_date: date | None = None
     dosage: str | None = None
     administered_by: str | None = None
+    cost: float | None = Field(default=None, ge=0)
     notes: str | None = None
 
 
@@ -127,3 +129,15 @@ def record_medication(farm_id: str, batch_id: str, data: MedicationCreate, _memb
 def list_medication(farm_id: str, batch_id: str, _member: dict = Depends(require_farm_role())):
     _get_batch_or_404(farm_id, batch_id)
     return crud.list_medication_records(batch_id)
+
+
+@router.get("/batches/{batch_id}/profit")
+def batch_profit(farm_id: str, batch_id: str, _member: dict = Depends(require_farm_role(*_FINANCE_VIEW_ROLES))):
+    """Real per-batch cost-allocated profit — see crud/finance.py's
+    batch_profit_summary() docstring for the weighted-average costing
+    method (AUDIT.md FWA-006). Restricted to finance-viewing roles, same
+    as finance_routes.py's /finance-summary — a worker who can log a
+    mortality event doesn't automatically get to see the batch's cost
+    and profit figures."""
+    _get_batch_or_404(farm_id, batch_id)
+    return crud.batch_profit_summary(farm_id, batch_id)

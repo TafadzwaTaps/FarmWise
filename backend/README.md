@@ -114,10 +114,11 @@ matching how WaziBot manages its schema.
 Get your Supabase URL and **service_role** key from
 Project Settings → API, and set `SUPABASE_URL` / `SUPABASE_KEY` in `.env`.
 
-Then run `farmwise_indexes_and_constraints_migration.sql` (project root)
-once in the SQL Editor — additive indexes plus two integrity constraints
-the application code already assumes exist. See the comment at the top
-of that file and `AUDIT.md` (FWA-021/FWA-022) for what it does and why.
+Then run `farmwise_indexes_and_constraints_migration.sql` and
+`farmwise_batch_costing_migration.sql` (project root) once each in the
+SQL Editor — additive indexes/constraints, and the columns needed for
+real per-batch profit calculation, respectively. See the comment at the
+top of each file and `AUDIT.md` for what they do and why.
 
 ### Run locally
 
@@ -178,7 +179,7 @@ This is deliberately not full coverage of every endpoint yet — see
 (notably: financial-accuracy tests once the batch cost-allocation rework
 lands, and auth edge cases like token expiry/refresh rotation).
 
-## Endpoints (unchanged paths)
+## Endpoints
 
 ```
 POST /api/v1/auth/signup
@@ -196,13 +197,14 @@ GET  /api/v1/farms/{farm_id}/members
 POST/GET /api/v1/farms/{farm_id}/animals/batches[/{batch_id}]
 POST/GET /api/v1/farms/{farm_id}/animals/batches/{batch_id}/mortality
 POST/GET /api/v1/farms/{farm_id}/animals/batches/{batch_id}/medication
+GET      /api/v1/farms/{farm_id}/animals/batches/{batch_id}/profit    (added — AUDIT.md FWA-006)
 
 POST/GET /api/v1/farms/{farm_id}/feed/purchases
 POST/GET /api/v1/farms/{farm_id}/feed/consumption
 GET      /api/v1/farms/{farm_id}/feed/cost-summary
 
-POST/GET /api/v1/farms/{farm_id}/sales
-POST/GET /api/v1/farms/{farm_id}/expenses
+POST/GET /api/v1/farms/{farm_id}/sales      (POST accepts an optional Idempotency-Key header — AUDIT.md FWA-007)
+POST/GET /api/v1/farms/{farm_id}/expenses   (POST accepts an optional batch_id to attribute the expense to a batch)
 POST/GET /api/v1/farms/{farm_id}/income
 GET      /api/v1/farms/{farm_id}/finance-summary
 

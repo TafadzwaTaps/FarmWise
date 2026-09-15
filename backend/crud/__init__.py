@@ -75,6 +75,7 @@ from crud.finance import (  # noqa: F401
     create_income,
     list_income,
     profit_loss_summary,
+    batch_profit_summary,
 )
 
 from crud.inventory import (  # noqa: F401

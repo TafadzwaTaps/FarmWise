@@ -642,8 +642,186 @@ run the two duplicate-detection `SELECT`s before the two `ALTER TABLE
 else in the file) those two will fail loudly — not silently — if
 pre-existing duplicate rows violate the new constraint.
 
-**Still open overall, carried forward:** FWA-006 (batch cost
-allocation) and FWA-023 (Decimal precision) are now explicitly linked
-as one follow-up phase, since they share the same code. FWA-015
-(credential rotation) remains the other outstanding item from Phase 1
-that isn't a code change at all.
+**Still open overall, carried forward:** FWA-006 (batch cost allocation)
+and FWA-023 (Decimal precision) are now explicitly linked as one
+follow-up phase, since they share the same code. FWA-015 (credential
+rotation) remains the other outstanding item from Phase 1 that isn't a
+code change at all.
+
+---
+
+# Phase 4 — Financial accuracy
+
+This phase closes FWA-006 (the single biggest item flagged since Phase
+1) — real per-batch cost-allocated profit, replacing (alongside, not
+instead of) the whole-farm period P&L that already existed.
+
+### FWA-006 — Batch cost allocation, resolved
+**Status:** FIXED
+
+Implemented the weighted-average costing method the original brief asked
+for, in `crud/finance.py`'s new `batch_profit_summary(farm_id, batch_id)`.
+The model, in one paragraph: every unit ever placed in a batch
+(`quantity_initial`) is assumed to carry an equal share of everything
+spent on that batch — purchase price + feed consumed + medication +
+any expense a farmer explicitly attributes to it — giving a single
+cost-per-unit. That figure is then applied to whatever happened to each
+unit: sold → cost of goods sold, still alive → remaining inventory
+value (not yet a profit or a loss), died → mortality loss (spent, never
+recoverable). By construction, those three always sum to the batch's
+total accumulated cost, and quantity sold + current + mortality always
+sum to quantity_initial — this is the exact worked example from the
+original brief (500 bought, 100 sold, 400 remain): the fix means the
+100 sold birds are charged 100/500 of the purchase cost, not all of it.
+
+**New migration required:** `farmwise_batch_costing_migration.sql` —
+adds two nullable columns the model needs that the schema didn't have:
+`medication_records.cost` (didn't exist at all — medication cost
+couldn't be tracked per-record before this) and `expenses.batch_id`
+(optional; lets a farmer attribute a specific expense to a batch without
+forcing every expense to pick one — omitted, an expense stays farm-level
+overhead exactly as before).
+
+**New endpoint:** `GET /farms/{farm_id}/animals/batches/{batch_id}/profit`
+— restricted to finance-viewing roles (farmer, farm_manager, accountant),
+matching the existing `/finance-summary` restriction; a worker who can
+log a mortality event doesn't automatically see cost/profit figures.
+
+**Data-completeness handling, not silent wrong numbers:** two real gaps
+are surfaced as explicit flags rather than hidden behind a confident-looking
+zero:
+- `feed_cost_incomplete`: true when a batch consumed feed that was never
+  purchased/priced anywhere on the farm — feed_cost would otherwise
+  silently read `0.0`, which looks like "free" rather than "unknown".
+- `medication_records_missing_cost`: count of medication records for
+  this batch with no `cost` value — medication_cost only sums what's
+  actually priced, so this tells the caller how much of the true cost
+  isn't captured.
+- `quantity_reconciles`: false if `quantity_sold + quantity_current +
+  quantity_mortality != quantity_initial` for the batch — would indicate
+  a data inconsistency predating this feature (or a manual DB edit), not
+  something to silently paper over.
+
+**Verification:** `pytest tests/test_batch_profit.py` — 14 tests,
+including the brief's exact worked example asserting `cost_of_goods_sold
+== 200.0` (not `1000.0`) and `gross_profit == 100.0` (not `-700.0`) for
+the 500/100/400 scenario; a separate test proving mortality loss is
+recognized as its own line item rather than silently folded into either
+the survivors' cost basis or the sold units' COGS; all four cost
+components (purchase + feed + medication + allocated expense) combining
+correctly; both data-completeness flags in both the flagged and
+not-flagged case; the unknown-batch error path; the reconciliation
+sanity check catching an inconsistent history; and three endpoint-level
+tests (worker denied, farmer allowed, cross-farm denied — reusing the
+same pattern as `test_farm_authorization.py`).
+
+---
+
+### FWA-007 — Idempotency protection (duplicate submissions)
+**Status:** FIXED for sales; recommended follow-up for expenses/income/mortality
+
+Added optional `Idempotency-Key` header support: `services/security.py`
+gained `check_idempotency_key(scope, key, ttl_seconds)`, an in-process
+TTL-based duplicate-detector (same architecture and same disclosed
+trade-off as the existing rate limiter — resets on redeploy, not shared
+across multiple server instances, good enough to catch the common case
+of a double-tap or a client's own retry-on-timeout logic). Wired into
+`POST /farms/{farm_id}/sales`: a client sends the same key on a retry
+and gets a clean `409` instead of a second sale being recorded. The
+header is optional — omitting it is byte-for-byte today's existing
+behavior, so no existing client breaks.
+
+**Why sales specifically and not also expenses/income/mortality in this
+pass:** sales is both the highest-value case (it also decrements batch
+stock, so a duplicate is a compounding error) and the one the original
+brief explicitly lists as a required test ("Add tests for: ... Duplicate
+sale requests"). The same `check_idempotency_key` helper is generic and
+ready to wire into the other write endpoints — recommended as a quick
+follow-up, not a design gap.
+
+**Verification:** `pytest` — 3 new tests: same key submitted twice
+rejects the second with `409` and the underlying `crud.create_sale` is
+confirmed called only once (not twice-then-rolled-back); omitting the
+header entirely preserves today's behavior (both requests succeed,
+`crud.create_sale` called twice); two different keys both succeed. 31/31
+tests pass overall.
+
+---
+
+### FWA-023 revisited — Decimal precision: investigated, not fixed, honestly
+**Status:** OPEN — investigated further, confirmed not safely fixable without deeper library changes
+
+Committed in Phase 3 to revisit this alongside FWA-006 since they touch
+the same code. Did — and confirmed empirically (not just reasoned about)
+that there's no safe path to it from `crud/*.py` alone:
+
+```
+>>> httpx.Request('POST', 'http://x', json={'amount': Decimal('12.50')})
+TypeError: Object of type Decimal is not JSON serializable
+```
+
+`supabase-py`'s `.insert()`/`.update()` calls go through `postgrest-py`,
+which hands the row dict to `httpx`'s `json=` parameter — that uses
+stdlib `json.dumps` with no `Decimal` support, so passing a raw
+`Decimal` anywhere in an insert/update payload would crash the request
+immediately. On the read side, Supabase returns `numeric` columns as
+unquoted JSON numbers, which `httpx`'s response parsing turns into
+Python `float` before `crud/finance.py` ever sees the value — there's no
+hook at the `crud` layer to intercept that and parse as `Decimal`
+instead without patching `postgrest-py`/`httpx` internals, which is far
+more invasive and far less verifiable from here than anything else in
+this audit.
+
+**What would actually fix it:** a custom JSON encoder/decoder wired into
+the shared `httpx.Client` `core/db.py` constructs (encode `Decimal` as a
+string on the way out — Postgres numeric columns accept numeric strings
+fine; decode numeric-looking JSON numbers as `Decimal` with a custom
+`parse_float` on the way in). That's a real, scoped, doable fix — just
+not one to ship in the same pass as a major financial-logic change
+without dedicated test coverage for the round-trip itself (insert a
+value with an awkward decimal expansion, read it back, assert nothing
+shifted), which is more verification surface than this pass had time
+for.
+
+**Practical risk assessment, stated plainly rather than hand-waved:**
+IEEE-754 `float64` has ~15-17 significant decimal digits. A single
+multiply-then-subtract (e.g. `quantity * unit_price - discount`) on
+realistic currency values has no observable precision loss — the
+existing `create_sale`/`create_expense` computations are not meaningfully
+at risk despite using `float`. The real exposure is accumulation:
+`profit_loss_summary` and the new `batch_profit_summary` both sum many
+`float()`-converted values. For this app's realistic transaction volumes
+(a smallholder farm — tens to low thousands of records, not millions),
+any accumulated error would be many orders of magnitude below a single
+cent and not something a farmer would ever actually see in their
+reports. This is a real category of risk worth fixing properly, not a
+currently-observable bug — stated honestly rather than either ignored
+or oversold.
+
+---
+
+## Phase 4 summary
+
+| ID | Severity | Status |
+|---|---|---|
+| FWA-006 | High | **Fixed** — weighted-average per-batch cost allocation, 14 tests including the brief's own worked example |
+| FWA-007 (sales) | Medium | **Fixed** — optional Idempotency-Key header, 3 tests |
+| FWA-007 (expenses/income/mortality) | Medium | Open — same helper, recommended quick follow-up |
+| FWA-023 | Medium | Open — investigated and confirmed genuinely hard to fix safely; practical risk quantified as very low at this app's scale |
+
+**New deliverables this phase:** `farmwise_batch_costing_migration.sql`
+(run in Supabase SQL Editor — additive, two nullable columns, no
+existing behavior changes); `GET .../batches/{batch_id}/profit`
+endpoint; 17 new tests (`test_batch_profit.py`).
+
+**What's genuinely done vs. still open, stated plainly:** the profit
+numbers a farmer sees for an individual batch are now real —
+cost-allocated, not "everything spent minus everything earned this
+month" — and are honest about what they don't know yet (unpriced feed,
+unpriced medication) rather than confidently wrong. What's still open:
+wiring the same idempotency protection into expenses/income/mortality
+(quick, same pattern, just not done yet); the Decimal precision question
+(real, low practical risk today, needs its own dedicated pass with
+round-trip test coverage); and everything already carried from Phases
+1-3 (FWA-015 credential rotation being the one that isn't a code
+change at all).

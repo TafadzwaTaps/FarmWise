@@ -12,6 +12,7 @@ from typing import Optional
 
 from core.db import supabase
 from crud._helpers import _now, _new_id, _one, _many
+from crud.animals import get_batch
 
 
 # ── Feed purchases ───────────────────────────────────────────────────────
@@ -162,4 +163,116 @@ def profit_loss_summary(farm_id: str, period_start: str, period_end: str) -> dic
         "net_profit": total_income - total_expenses,
         "expenses_by_category": dict(expenses_by_category),
         "income_by_category": dict(income_by_category),
+    }
+
+
+# ── Per-batch cost allocation (AUDIT.md FWA-006) ─────────────────────────
+
+def batch_profit_summary(farm_id: str, batch_id: str) -> dict:
+    """Real per-batch profit, using a weighted-average costing method —
+    NOT the naive "all farm income minus all farm expenses in a date
+    window" that profit_loss_summary() above computes (that's a whole-
+    farm period P&L, which is a genuinely different and still-useful
+    report; this is the per-batch one AUDIT.md FWA-006 was about).
+
+    The method: every unit ever placed into the batch (quantity_initial)
+    is assumed to carry an equal share of the batch's total accumulated
+    cost — purchase price + feed consumed + medication + any expense the
+    farmer explicitly attributed to this batch. That gives a single
+    cost-per-unit, applied to whatever happened to each unit since:
+
+        sold        → cost_of_goods_sold        (revenue vs. this batch's actual cost)
+        still alive → remaining_inventory_value (capital tied up, not yet a profit or loss)
+        died        → mortality_loss            (cost incurred that no sale will ever recover)
+
+    By construction, cost_of_goods_sold + remaining_inventory_value +
+    mortality_loss == total_accumulated_cost, and quantity_sold +
+    quantity_current + quantity_mortality == quantity_initial — this is
+    the exact worked example from the original brief: 500 bought, 100
+    sold, 400 remain. The full purchase cost is NOT charged against the
+    100 sold; only 100/500 of it is, and the other 400/500 sits in
+    `remaining_inventory_value` instead of `net_profit`.
+
+    This mirrors WaziBot's overall approach of aggregating in Python
+    rather than in SQL, and reuses feed_cost_summary()'s existing
+    average-cost-per-kg logic rather than recomputing it, so this stays
+    consistent with what that endpoint already reports.
+
+    Two known data-completeness gaps are surfaced, not hidden:
+      - feed_cost_incomplete: feed was consumed by this batch but no
+        feed purchase (any feed_type) has ever been logged, so there's
+        no price to apply — feed_cost silently reads as 0.0 without
+        this flag, which would be a confidently wrong number.
+      - medication_records_missing_cost: count of medication rows for
+        this batch that have no `cost` value — medication_cost only
+        sums what's actually priced, so this tells the caller how much
+        of the true cost isn't captured yet.
+    """
+    batch = get_batch(farm_id, batch_id)
+    if batch is None:
+        raise ValueError("batch_not_found")
+
+    quantity_initial = batch["quantity_initial"]
+    quantity_current = batch["quantity_current"]
+
+    sales_res = supabase.table("sales").select("quantity,total_amount").eq("farm_id", farm_id).eq("batch_id", batch_id).execute()
+    sales = _many(sales_res)
+    quantity_sold = sum(s["quantity"] for s in sales)
+    total_sales_revenue = sum(float(s["total_amount"]) for s in sales)
+
+    mortality_res = supabase.table("mortality_records").select("quantity").eq("batch_id", batch_id).execute()
+    quantity_mortality = sum(r["quantity"] for r in _many(mortality_res))
+
+    purchase_cost = float(batch["purchase_price_total"] or 0)
+
+    feed = feed_cost_summary(farm_id, batch_id)
+    feed_cost = feed["cost_per_batch"] or 0.0
+    feed_cost_incomplete = feed["total_consumed_kg"] > 0 and feed["total_purchased_kg"] == 0
+
+    medication_res = supabase.table("medication_records").select("cost").eq("batch_id", batch_id).execute()
+    medication_records = _many(medication_res)
+    medication_cost = sum(float(m["cost"]) for m in medication_records if m.get("cost") is not None)
+    medication_records_missing_cost = sum(1 for m in medication_records if m.get("cost") is None)
+
+    allocated_res = supabase.table("expenses").select("amount").eq("farm_id", farm_id).eq("batch_id", batch_id).execute()
+    allocated_expenses_cost = sum(float(e["amount"]) for e in _many(allocated_res))
+
+    total_accumulated_cost = purchase_cost + feed_cost + medication_cost + allocated_expenses_cost
+    cost_per_unit = (total_accumulated_cost / quantity_initial) if quantity_initial else 0.0
+
+    cost_of_goods_sold = cost_per_unit * quantity_sold
+    remaining_inventory_value = cost_per_unit * quantity_current
+    mortality_loss = cost_per_unit * quantity_mortality
+
+    gross_profit = total_sales_revenue - cost_of_goods_sold
+    net_profit = total_sales_revenue - cost_of_goods_sold - mortality_loss
+
+    # Sanity check on the model, not a live guard: if these don't add up,
+    # something about the batch's history is inconsistent (e.g. a sale or
+    # mortality record predating this feature, or a manual DB edit) —
+    # surfaced so the farmer/support can investigate, not silently ignored.
+    quantity_reconciles = (quantity_sold + quantity_current + quantity_mortality) == quantity_initial
+
+    return {
+        "batch_id": batch_id,
+        "batch_name": batch["batch_name"],
+        "quantity_initial": quantity_initial,
+        "quantity_sold": quantity_sold,
+        "quantity_current": quantity_current,
+        "quantity_mortality": quantity_mortality,
+        "quantity_reconciles": quantity_reconciles,
+        "purchase_cost": round(purchase_cost, 2),
+        "feed_cost": round(feed_cost, 2),
+        "feed_cost_incomplete": feed_cost_incomplete,
+        "medication_cost": round(medication_cost, 2),
+        "medication_records_missing_cost": medication_records_missing_cost,
+        "allocated_expenses_cost": round(allocated_expenses_cost, 2),
+        "total_accumulated_cost": round(total_accumulated_cost, 2),
+        "cost_per_unit": round(cost_per_unit, 4),
+        "total_sales_revenue": round(total_sales_revenue, 2),
+        "cost_of_goods_sold": round(cost_of_goods_sold, 2),
+        "remaining_inventory_value": round(remaining_inventory_value, 2),
+        "mortality_loss": round(mortality_loss, 2),
+        "gross_profit": round(gross_profit, 2),
+        "net_profit": round(net_profit, 2),
     }

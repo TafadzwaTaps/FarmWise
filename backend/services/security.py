@@ -79,6 +79,52 @@ def is_login_locked(ip: str, username: str) -> bool:
     return len(recent) >= _LOCKOUT_THRESHOLD
 
 
+# ── Idempotency (duplicate-submission protection) ─────────────────────────
+# AUDIT.md FWA-007: a farmer double-tapping "Record Sale" on a slow mobile
+# connection (or a client's own retry-on-timeout logic) can otherwise
+# create two identical records for one real-world event. Client sends an
+# Idempotency-Key header (any client-generated string, typically a UUID
+# per form submission); reusing that key within the window is rejected as
+# a duplicate rather than creating a second record.
+#
+# Same in-process, no-Redis trade-off as the rate limiter above (resets on
+# redeploy, not shared across multiple server instances) — good enough to
+# catch the common case, not a cross-instance guarantee. Rejects the
+# duplicate rather than transparently replaying the original response;
+# simpler and still solves the actual problem (no duplicate record
+# created), at the cost of the retry needing to treat 409 as "already
+# done" rather than getting the original data back.
+
+class DuplicateSubmission(Exception):
+    pass
+
+
+_idempotency_lock = threading.Lock()
+_idempotency_seen: dict[str, float] = {}
+_IDEMPOTENCY_DEFAULT_TTL = 300  # 5 minutes — long enough to catch a retry, short enough not to leak memory
+
+
+def check_idempotency_key(scope: str, key: str | None, ttl_seconds: int = _IDEMPOTENCY_DEFAULT_TTL) -> None:
+    """No-op if key is None — the header is optional, so callers who don't
+    send one get today's existing behavior exactly. Raises
+    DuplicateSubmission if (scope, key) was already seen within ttl_seconds."""
+    if not key:
+        return
+    full_key = f"{scope}:{key}"
+    now = time.monotonic()
+    with _idempotency_lock:
+        # Opportunistic cleanup so this dict doesn't grow unbounded — cheap
+        # relative to how rarely this function is called (once per write).
+        if len(_idempotency_seen) > 10_000:
+            cutoff = now - ttl_seconds
+            for k in [k for k, t in _idempotency_seen.items() if t < cutoff]:
+                del _idempotency_seen[k]
+        seen_at = _idempotency_seen.get(full_key)
+        if seen_at is not None and (now - seen_at) < ttl_seconds:
+            raise DuplicateSubmission(f"Duplicate submission for key {key!r}")
+        _idempotency_seen[full_key] = now
+
+
 def clear_failed_logins(ip: str, username: str) -> None:
     _failed_logins.pop(_key(ip, username), None)
 
