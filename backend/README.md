@@ -155,7 +155,7 @@ loads the landing page directly, no separate frontend URL to keep straight.
 ## Running the tests
 
 ```bash
-pip install -r requirements.txt   # includes pytest
+pip install -r requirements.txt   # includes pytest and pytest-asyncio
 pytest tests/ -v
 ```
 
@@ -173,11 +173,21 @@ actual signed JWTs. Current coverage:
   check-then-act race conditions fixed in `crud/animals.py` and
   `crud/inventory.py` (see `AUDIT.md` FWA-005): both the success path and
   the "lost the race, must not silently corrupt data" path.
+- `test_batch_profit.py` — the per-batch cost allocation model (`AUDIT.md`
+  FWA-006), including the brief's own 500/100/400 worked example, plus
+  idempotency tests for duplicate sale submissions (FWA-007).
+- `test_ai_assistant.py` — role-gated AI context (a worker must not get
+  financial figures through the assistant that the direct API already
+  blocks them from — `AUDIT.md` FWA-024), the system prompt's
+  injection-defense instruction, and the async retry logic in
+  `services/ai_service.chat()` (transient 5xx retried, auth errors not
+  retried, persistent failure gives up after `MAX_RETRIES`).
 
 This is deliberately not full coverage of every endpoint yet — see
 `AUDIT.md`'s "Not done in this pass" note for what's still missing
-(notably: financial-accuracy tests once the batch cost-allocation rework
-lands, and auth edge cases like token expiry/refresh rotation).
+(notably: auth edge cases like token expiry/refresh rotation, and
+idempotency protection on expenses/income/mortality beyond the sales
+endpoint it's currently wired into).
 
 ## Endpoints
 

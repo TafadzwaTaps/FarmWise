@@ -9,6 +9,7 @@ import crud
 from core.auth import get_current_user, require_farm_role
 from services.ai_service import chat as ai_chat, AssistantUnavailableError
 from services.security import check as _rate_check, RateLimitExceeded
+from routes._deps import audit
 
 router = APIRouter(prefix="/farms/{farm_id}/assistant", tags=["AI Assistant"])
 
@@ -18,21 +19,26 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/chat")
-def send_message(
+async def send_message(
     farm_id: str,
     data: ChatRequest,
     request: Request,
-    _member: dict = Depends(require_farm_role()),
+    member: dict = Depends(require_farm_role()),
     user: dict = Depends(get_current_user),
 ):
     # Every call here hits Gemini's API (a shared, quota-limited, per-project
     # key — see services/ai_service.py) and now costs real money/quota once
-    # past the free tier. Without a limit, one chatty or malicious farm
-    # member can exhaust the whole app's AI quota for every other farm.
-    # Scoped to the user (not just IP) since IPs are shared behind NAT/mobile
-    # carriers in the regions this app targets.
+    # past the free tier. Two limits, not one:
+    #   - per-user: one chatty or malicious farm member can't exhaust the
+    #     whole app's AI quota for every other farm.
+    #   - per-farm: several different members of the SAME farm hammering it
+    #     independently would each pass their own per-user limit while
+    #     still adding up to disproportionate load against one farm.
+    # Both scoped to the user/farm id (not just IP) since IPs are shared
+    # behind NAT/mobile carriers in the regions this app targets.
     try:
-        _rate_check(f"ai-chat:{user['user_id']}", request, max_calls=20, window_seconds=3600)
+        _rate_check(f"ai-chat-user:{user['user_id']}", request, max_calls=20, window_seconds=3600)
+        _rate_check(f"ai-chat-farm:{farm_id}", request, max_calls=60, window_seconds=3600)
     except RateLimitExceeded:
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
@@ -49,12 +55,17 @@ def send_message(
     crud.create_ai_message(farm_id, user["user_id"], "user", data.message)
 
     try:
-        reply = ai_chat(farm_id, user["user_id"], farm["name"], farm.get("currency", "USD"), data.message)
+        reply = await ai_chat(
+            farm_id, user["user_id"], farm["name"], farm.get("currency", "USD"),
+            data.message, member["role"],
+        )
+        audit("ai_chat_completed", farm_id=farm_id, user_id=user["user_id"], role=member["role"])
     except AssistantUnavailableError as exc:
         # Config errors (bad API key, wrong provider's key, etc.) come with
         # an actionable message worth showing directly — "try again" would
         # be actively misleading for something a retry can't fix.
         reply = str(exc) or "I'm having trouble reaching the AI service right now. Please try again in a moment."
+        audit("ai_chat_failed", farm_id=farm_id, user_id=user["user_id"], role=member["role"], reason=str(exc)[:200])
 
     saved = crud.create_ai_message(farm_id, user["user_id"], "assistant", reply)
     return {"reply": reply, "created_at": saved["created_at"]}
