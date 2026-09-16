@@ -37,40 +37,144 @@ def _mock_chain(final_result_data):
 # ── animal_batches (crud/animals.py) ─────────────────────────────────────
 
 def test_decrement_batch_quantity_succeeds_with_enough_stock(monkeypatch):
-    table_mock, chain = _mock_chain([{"id": "b1", "quantity_current": 5}])
+    table_mock, chain = _mock_chain([{"id": "b1", "quantity_current": 5, "updated_at": "t1"}])
     monkeypatch.setattr(animals_crud, "supabase", MagicMock(table=MagicMock(return_value=table_mock)))
 
-    result = animals_crud.decrement_batch_quantity({"id": "b1", "quantity_current": 10}, 5)
+    batch = {"id": "b1", "farm_id": "f1", "quantity_current": 10, "updated_at": "t0", "status": "active"}
+    result = animals_crud.decrement_batch_quantity(batch, 5)
 
     assert result["quantity_current"] == 5
-    # The WHERE clause must include the stock guard, not just the id.
+    # Guarded on the optimistic-concurrency version (updated_at), not a
+    # WHERE-clause quantity comparison — see the function's docstring for
+    # why the old .gte() approach could lose an update under concurrency.
     chain.eq.assert_any_call("id", "b1")
-    chain.gte.assert_called_once_with("quantity_current", 5)
+    chain.eq.assert_any_call("updated_at", "t0")
 
 
-def test_decrement_batch_quantity_raises_on_lost_race(monkeypatch):
-    """Simulates: between the caller's own pre-check and this UPDATE, a
-    concurrent request already dropped the row's quantity below what's
-    being requested — the WHERE clause matches zero rows."""
-    table_mock, chain = _mock_chain([])  # no rows matched
-    monkeypatch.setattr(animals_crud, "supabase", MagicMock(table=MagicMock(return_value=table_mock)))
-
+def test_decrement_batch_quantity_raises_when_insufficient_stock():
+    """The sufficiency check now happens in Python against the batch dict
+    passed in (or freshly re-read on retry), before any query is even
+    issued — a request for more than what's on hand is rejected
+    immediately rather than round-tripping to the DB first."""
+    batch = {"id": "b1", "farm_id": "f1", "quantity_current": 3, "updated_at": "t0", "status": "active"}
     try:
-        animals_crud.decrement_batch_quantity({"id": "b1", "quantity_current": 10}, 5)
-        assert False, "expected ValueError for a lost race, got a normal return"
-    except ValueError:
-        pass  # correct — caller (routes/finance_routes.py, routes/animal_routes.py) turns this into a 409
+        animals_crud.decrement_batch_quantity(batch, 5)
+        assert False, "expected ValueError for insufficient stock"
+    except ValueError as e:
+        assert "insufficient_stock" in str(e)
 
 
 def test_decrement_batch_quantity_closes_batch_at_zero(monkeypatch):
-    table_mock, chain = _mock_chain([{"id": "b1", "quantity_current": 0, "status": "closed"}])
+    table_mock, chain = _mock_chain([{"id": "b1", "quantity_current": 0, "status": "closed", "updated_at": "t1"}])
     monkeypatch.setattr(animals_crud, "supabase", MagicMock(table=MagicMock(return_value=table_mock)))
 
-    animals_crud.decrement_batch_quantity({"id": "b1", "quantity_current": 5}, 5)
+    batch = {"id": "b1", "farm_id": "f1", "quantity_current": 5, "updated_at": "t0", "status": "active"}
+    animals_crud.decrement_batch_quantity(batch, 5)
 
     called_fields = table_mock.update.call_args[0][0]
     assert called_fields["quantity_current"] == 0
     assert called_fields["status"] == "closed"
+
+
+def test_decrement_batch_quantity_retries_after_lost_race_then_succeeds(monkeypatch):
+    """The actual regression test for the fix: a concurrent writer changes
+    the row between this function's first read and its write — the first
+    attempt must lose cleanly (zero rows matched, not a wrong value
+    written) and retry against a freshly re-read row, landing on the
+    CORRECT final quantity rather than silently overwriting with a
+    stale-derived one. This is exactly the batch-at-10/two-sales-of-3
+    scenario from the docstring: this call is the "second" sale, racing
+    against a concurrent first sale that already landed."""
+    table_mock = MagicMock()
+    chain = table_mock.update.return_value
+    chain.eq.return_value = chain
+    # First .execute(): lost the race (another writer already changed
+    # updated_at). Second .execute(): succeeds against the fresh value.
+    chain.execute.side_effect = [_FakeResult([]), _FakeResult([{"id": "b1", "quantity_current": 4, "updated_at": "t2"}])]
+
+    select_chain = MagicMock()
+    select_chain.select.return_value = select_chain
+    select_chain.eq.return_value = select_chain
+    select_chain.is_.return_value = select_chain
+    select_chain.limit.return_value = select_chain
+    # The concurrent sale already landed: quantity dropped from 10 to 7.
+    select_chain.execute.return_value = _FakeResult([{"id": "b1", "farm_id": "f1", "quantity_current": 7, "updated_at": "t1", "status": "active"}])
+
+    def _table_router(name):
+        m = MagicMock()
+        m.update.return_value = chain
+        m.select.return_value = select_chain
+        return m
+    monkeypatch.setattr(animals_crud, "supabase", MagicMock(table=MagicMock(side_effect=_table_router)))
+
+    # This call started with a stale in-memory batch (quantity_current=10,
+    # as if read before the concurrent sale landed) and asks to take 3.
+    stale_batch = {"id": "b1", "farm_id": "f1", "quantity_current": 10, "updated_at": "t0", "status": "active"}
+    result = animals_crud.decrement_batch_quantity(stale_batch, 3)
+
+    # Correct final answer is 7 - 3 = 4, NOT 10 - 3 = 7 (which is what the
+    # old buggy version would have silently written, discarding the
+    # concurrent sale's effect entirely).
+    assert result["quantity_current"] == 4
+    assert chain.execute.call_count == 2
+
+
+def test_decrement_batch_quantity_gives_up_after_exhausting_retries(monkeypatch):
+    table_mock = MagicMock()
+    chain = table_mock.update.return_value
+    chain.eq.return_value = chain
+    chain.execute.return_value = _FakeResult([])  # always loses
+
+    select_chain = MagicMock()
+    select_chain.select.return_value = select_chain
+    select_chain.eq.return_value = select_chain
+    select_chain.is_.return_value = select_chain
+    select_chain.limit.return_value = select_chain
+    select_chain.execute.return_value = _FakeResult([{"id": "b1", "farm_id": "f1", "quantity_current": 7, "updated_at": "t-changed", "status": "active"}])
+
+    def _table_router(name):
+        m = MagicMock()
+        m.update.return_value = chain
+        m.select.return_value = select_chain
+        return m
+    monkeypatch.setattr(animals_crud, "supabase", MagicMock(table=MagicMock(side_effect=_table_router)))
+
+    batch = {"id": "b1", "farm_id": "f1", "quantity_current": 10, "updated_at": "t0", "status": "active"}
+    try:
+        animals_crud.decrement_batch_quantity(batch, 3)
+        assert False, "expected ValueError after exhausting retries"
+    except ValueError:
+        pass
+
+
+def test_decrement_batch_quantity_negative_amount_restores_stock(monkeypatch):
+    """Used by sale/mortality edit-and-delete to give stock back — see
+    routes/finance_routes.py's delete_sale and
+    routes/animal_routes.py's delete_mortality."""
+    table_mock, chain = _mock_chain([{"id": "b1", "quantity_current": 8, "updated_at": "t1"}])
+    monkeypatch.setattr(animals_crud, "supabase", MagicMock(table=MagicMock(return_value=table_mock)))
+
+    batch = {"id": "b1", "farm_id": "f1", "quantity_current": 5, "updated_at": "t0", "status": "active"}
+    result = animals_crud.decrement_batch_quantity(batch, -3)  # negative = give back
+
+    assert result["quantity_current"] == 8
+    called_fields = table_mock.update.call_args[0][0]
+    assert called_fields["quantity_current"] == 8
+
+
+def test_decrement_batch_quantity_reopens_closed_batch_on_restore(monkeypatch):
+    """A batch that auto-closed at zero, then had a sale/mortality record
+    against it deleted, should reopen — a 'closed' batch with a positive
+    headcount is an inconsistent state that could never happen before
+    this pass added stock-restoring callers."""
+    table_mock, chain = _mock_chain([{"id": "b1", "quantity_current": 3, "status": "active", "updated_at": "t1"}])
+    monkeypatch.setattr(animals_crud, "supabase", MagicMock(table=MagicMock(return_value=table_mock)))
+
+    batch = {"id": "b1", "farm_id": "f1", "quantity_current": 0, "updated_at": "t0", "status": "closed"}
+    animals_crud.decrement_batch_quantity(batch, -3)
+
+    called_fields = table_mock.update.call_args[0][0]
+    assert called_fields["status"] == "active"
 
 
 # ── inventory_items (crud/inventory.py) ──────────────────────────────────

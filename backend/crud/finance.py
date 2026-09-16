@@ -8,6 +8,7 @@ going through supabase-py/PostgREST instead of raw SQL.
 from __future__ import annotations
 
 from collections import defaultdict
+from typing import Optional
 
 from core.db import supabase
 from crud._helpers import _now, _new_id, _one, _many
@@ -23,6 +24,30 @@ def create_feed_purchase(farm_id: str, data: dict) -> dict:
     return _one(res)
 
 
+def get_feed_purchase(farm_id: str, purchase_id: str) -> Optional[dict]:
+    res = supabase.table("feed_purchases").select("*").eq("id", purchase_id).eq("farm_id", farm_id).limit(1).execute()
+    return _one(res)
+
+
+def update_feed_purchase(farm_id: str, purchase_id: str, fields: dict) -> Optional[dict]:
+    # quantity_kg/unit_cost changing means total_cost must be recomputed —
+    # never trust a stale total_cost sitting in the request payload.
+    if "quantity_kg" in fields or "unit_cost" in fields:
+        current = get_feed_purchase(farm_id, purchase_id)
+        if current is None:
+            return None
+        quantity_kg = fields.get("quantity_kg", current["quantity_kg"])
+        unit_cost = fields.get("unit_cost", current["unit_cost"])
+        fields = {**fields, "total_cost": quantity_kg * unit_cost}
+    fields = {**fields, "updated_at": _now()}
+    res = supabase.table("feed_purchases").update(fields).eq("id", purchase_id).eq("farm_id", farm_id).execute()
+    return _one(res)
+
+
+def delete_feed_purchase(farm_id: str, purchase_id: str) -> None:
+    supabase.table("feed_purchases").delete().eq("id", purchase_id).eq("farm_id", farm_id).execute()
+
+
 def list_feed_purchases(farm_id: str) -> list[dict]:
     res = supabase.table("feed_purchases").select("*").eq("farm_id", farm_id).order("purchase_date", desc=True).execute()
     return _many(res)
@@ -34,6 +59,21 @@ def create_feed_consumption(farm_id: str, data: dict) -> dict:
     row = {"id": _new_id(), "farm_id": farm_id, "created_at": _now(), "updated_at": _now(), **data}
     res = supabase.table("feed_consumption").insert(row).execute()
     return _one(res)
+
+
+def get_feed_consumption_record(farm_id: str, record_id: str) -> Optional[dict]:
+    res = supabase.table("feed_consumption").select("*").eq("id", record_id).eq("farm_id", farm_id).limit(1).execute()
+    return _one(res)
+
+
+def update_feed_consumption(farm_id: str, record_id: str, fields: dict) -> Optional[dict]:
+    fields = {**fields, "updated_at": _now()}
+    res = supabase.table("feed_consumption").update(fields).eq("id", record_id).eq("farm_id", farm_id).execute()
+    return _one(res)
+
+
+def delete_feed_consumption(farm_id: str, record_id: str) -> None:
+    supabase.table("feed_consumption").delete().eq("id", record_id).eq("farm_id", farm_id).execute()
 
 
 def list_feed_consumption(farm_id: str, batch_id: str | None = None) -> list[dict]:
@@ -86,6 +126,41 @@ def create_sale(farm_id: str, data: dict) -> dict:
     return _one(res)
 
 
+def get_sale(farm_id: str, sale_id: str) -> Optional[dict]:
+    res = supabase.table("sales").select("*").eq("id", sale_id).eq("farm_id", farm_id).limit(1).execute()
+    return _one(res)
+
+
+def update_sale(farm_id: str, sale_id: str, fields: dict) -> Optional[dict]:
+    """batch_id is deliberately never accepted here (routes/finance_routes.py
+    doesn't expose it on the update schema) — moving a sale to a different
+    batch would mean reconciling stock on TWO batches instead of one, which
+    is a bigger, messier operation than "fix a typo in this sale". If a
+    sale was logged against the wrong batch, the correct fix is to delete
+    it (restores the wrong batch's stock) and create a new one (decrements
+    the right batch's stock) — each already handles its own stock
+    reconciliation correctly.
+
+    total_amount is always recomputed here when quantity/unit_price/discount
+    change — never trust a stale total_amount sitting in the request
+    payload, same principle as feed purchases' total_cost above."""
+    if any(k in fields for k in ("quantity", "unit_price", "discount")):
+        current = get_sale(farm_id, sale_id)
+        if current is None:
+            return None
+        quantity = fields.get("quantity", current["quantity"])
+        unit_price = fields.get("unit_price", current["unit_price"])
+        discount = fields.get("discount", current["discount"])
+        fields = {**fields, "total_amount": (quantity * unit_price) - discount}
+    fields = {**fields, "updated_at": _now()}
+    res = supabase.table("sales").update(fields).eq("id", sale_id).eq("farm_id", farm_id).execute()
+    return _one(res)
+
+
+def delete_sale(farm_id: str, sale_id: str) -> None:
+    supabase.table("sales").delete().eq("id", sale_id).eq("farm_id", farm_id).execute()
+
+
 def list_sales(farm_id: str, period_start: str | None = None, period_end: str | None = None) -> list[dict]:
     query = supabase.table("sales").select("*").eq("farm_id", farm_id)
     if period_start:
@@ -104,6 +179,21 @@ def create_expense(farm_id: str, data: dict) -> dict:
     return _one(res)
 
 
+def get_expense(farm_id: str, expense_id: str) -> Optional[dict]:
+    res = supabase.table("expenses").select("*").eq("id", expense_id).eq("farm_id", farm_id).limit(1).execute()
+    return _one(res)
+
+
+def update_expense(farm_id: str, expense_id: str, fields: dict) -> Optional[dict]:
+    fields = {**fields, "updated_at": _now()}
+    res = supabase.table("expenses").update(fields).eq("id", expense_id).eq("farm_id", farm_id).execute()
+    return _one(res)
+
+
+def delete_expense(farm_id: str, expense_id: str) -> None:
+    supabase.table("expenses").delete().eq("id", expense_id).eq("farm_id", farm_id).execute()
+
+
 def list_expenses(farm_id: str, period_start: str | None = None, period_end: str | None = None) -> list[dict]:
     query = supabase.table("expenses").select("*").eq("farm_id", farm_id)
     if period_start:
@@ -120,6 +210,21 @@ def create_income(farm_id: str, data: dict) -> dict:
     row = {"id": _new_id(), "farm_id": farm_id, "created_at": _now(), "updated_at": _now(), **data}
     res = supabase.table("income").insert(row).execute()
     return _one(res)
+
+
+def get_income(farm_id: str, income_id: str) -> Optional[dict]:
+    res = supabase.table("income").select("*").eq("id", income_id).eq("farm_id", farm_id).limit(1).execute()
+    return _one(res)
+
+
+def update_income(farm_id: str, income_id: str, fields: dict) -> Optional[dict]:
+    fields = {**fields, "updated_at": _now()}
+    res = supabase.table("income").update(fields).eq("id", income_id).eq("farm_id", farm_id).execute()
+    return _one(res)
+
+
+def delete_income(farm_id: str, income_id: str) -> None:
+    supabase.table("income").delete().eq("id", income_id).eq("farm_id", farm_id).execute()
 
 
 def list_income(farm_id: str, period_start: str | None = None, period_end: str | None = None) -> list[dict]:

@@ -3,6 +3,7 @@ Routes: /farms/{farm_id}/animals/batches, .../mortality, .../medication
 """
 
 from datetime import date
+from datetime import date as _date  # alias for use in fields literally named "date" that also carry a default — see MortalityUpdate below
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -41,6 +42,21 @@ class AnimalBatchCreate(BaseModel):
     notes: str | None = None
 
 
+class AnimalBatchUpdate(BaseModel):
+    """species and quantity_initial/quantity_current are deliberately
+    absent — see crud.update_batch's docstring for why. Everything else
+    about a batch (name, breed, cost, supplier, dates, notes) is fixable
+    after the fact, same as any other record in this app."""
+    batch_name: str | None = Field(default=None, min_length=1, max_length=150)
+    breed: str | None = None
+    purchase_date: date | None = None
+    purchase_price_total: float | None = None
+    supplier: str | None = None
+    average_weight_kg: float | None = None
+    expected_selling_date: date | None = None
+    notes: str | None = None
+
+
 class MortalityCreate(BaseModel):
     date: date
     quantity: int = Field(gt=0)
@@ -48,9 +64,28 @@ class MortalityCreate(BaseModel):
     notes: str | None = None
 
 
+class MortalityUpdate(BaseModel):
+    """quantity isn't editable here — see crud.update_mortality_record's
+    docstring. date/cause/notes are safe to fix without touching stock."""
+    date: _date | None = None
+    cause: str | None = None
+    notes: str | None = None
+
+
 class MedicationCreate(BaseModel):
     type: MedicationType
     name: str
+    date_administered: date | None = None
+    next_due_date: date | None = None
+    dosage: str | None = None
+    administered_by: str | None = None
+    cost: float | None = Field(default=None, ge=0)
+    notes: str | None = None
+
+
+class MedicationUpdate(BaseModel):
+    type: MedicationType | None = None
+    name: str | None = Field(default=None, min_length=1)
     date_administered: date | None = None
     next_due_date: date | None = None
     dosage: str | None = None
@@ -84,6 +119,28 @@ def get_batch(farm_id: str, batch_id: str, _member: dict = Depends(require_farm_
     return _get_batch_or_404(farm_id, batch_id)
 
 
+@router.patch("/batches/{batch_id}")
+def update_batch(farm_id: str, batch_id: str, data: AnimalBatchUpdate, _member: dict = Depends(require_farm_role(*_MANAGE_ROLES))):
+    _get_batch_or_404(farm_id, batch_id)
+    fields = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing to update")
+    if "purchase_date" in fields:
+        fields["purchase_date"] = fields["purchase_date"].isoformat()
+    if "expected_selling_date" in fields:
+        fields["expected_selling_date"] = fields["expected_selling_date"].isoformat()
+    return crud.update_batch(farm_id, batch_id, fields)
+
+
+@router.delete("/batches/{batch_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_batch(farm_id: str, batch_id: str, _member: dict = Depends(require_farm_role(*_MANAGE_ROLES))):
+    """Soft delete — the batch's sales/mortality/medication/feed-consumption
+    history stays intact and queryable by id, just hidden from normal
+    batch listings going forward (see crud.soft_delete_batch's docstring)."""
+    _get_batch_or_404(farm_id, batch_id)
+    crud.soft_delete_batch(farm_id, batch_id)
+
+
 @router.post("/batches/{batch_id}/mortality", status_code=status.HTTP_201_CREATED)
 def record_mortality(farm_id: str, batch_id: str, data: MortalityCreate, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
     """Recording a death atomically decrements the batch's live quantity —
@@ -115,6 +172,31 @@ def list_mortality(farm_id: str, batch_id: str, _member: dict = Depends(require_
     return crud.list_mortality_records(batch_id)
 
 
+@router.patch("/batches/{batch_id}/mortality/{record_id}")
+def update_mortality(farm_id: str, batch_id: str, record_id: str, data: MortalityUpdate, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
+    _get_batch_or_404(farm_id, batch_id)
+    if crud.get_mortality_record(batch_id, record_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Mortality record not found")
+    fields = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing to update")
+    if "date" in fields:
+        fields["date"] = fields["date"].isoformat()
+    return crud.update_mortality_record(batch_id, record_id, fields)
+
+
+@router.delete("/batches/{batch_id}/mortality/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_mortality(farm_id: str, batch_id: str, record_id: str, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
+    batch = _get_batch_or_404(farm_id, batch_id)
+    record = crud.get_mortality_record(batch_id, record_id)
+    if record is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Mortality record not found")
+    # Deleting a mortality record means those animals didn't actually die
+    # (a logging mistake) — restore the stock it removed at creation time.
+    crud.decrement_batch_quantity(batch, -record["quantity"])  # negative amount = give back, see crud/animals.py
+    crud.delete_mortality_record(batch_id, record_id)
+
+
 @router.post("/batches/{batch_id}/medication", status_code=status.HTTP_201_CREATED)
 def record_medication(farm_id: str, batch_id: str, data: MedicationCreate, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
     _get_batch_or_404(farm_id, batch_id)
@@ -128,6 +210,29 @@ def record_medication(farm_id: str, batch_id: str, data: MedicationCreate, _memb
 def list_medication(farm_id: str, batch_id: str, _member: dict = Depends(require_farm_role())):
     _get_batch_or_404(farm_id, batch_id)
     return crud.list_medication_records(batch_id)
+
+
+@router.patch("/batches/{batch_id}/medication/{record_id}")
+def update_medication(farm_id: str, batch_id: str, record_id: str, data: MedicationUpdate, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
+    _get_batch_or_404(farm_id, batch_id)
+    if crud.get_medication_record(batch_id, record_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Medication record not found")
+    fields = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing to update")
+    if "date_administered" in fields:
+        fields["date_administered"] = fields["date_administered"].isoformat()
+    if "next_due_date" in fields:
+        fields["next_due_date"] = fields["next_due_date"].isoformat()
+    return crud.update_medication_record(batch_id, record_id, fields)
+
+
+@router.delete("/batches/{batch_id}/medication/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_medication(farm_id: str, batch_id: str, record_id: str, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
+    _get_batch_or_404(farm_id, batch_id)
+    if crud.get_medication_record(batch_id, record_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Medication record not found")
+    crud.delete_medication_record(batch_id, record_id)
 
 
 @router.get("/batches/{batch_id}/profit")

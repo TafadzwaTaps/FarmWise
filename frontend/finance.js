@@ -102,9 +102,31 @@ document.getElementById('entityTabs').addEventListener('click', async (e) => {
 });
 
 document.getElementById('addBtn').addEventListener('click', () => {
-  if (activeTab === 'sales') { document.getElementById('saleDate').value = todayISO(); openModal('saleModal'); }
-  if (activeTab === 'expenses') { document.getElementById('expenseDate').value = todayISO(); openModal('expenseModal'); }
-  if (activeTab === 'income') { document.getElementById('incomeDate').value = todayISO(); openModal('incomeModal'); }
+  if (activeTab === 'sales') {
+    editingSaleId = null;
+    document.getElementById('saleForm').reset();
+    document.getElementById('saleModalTitle').textContent = 'New sale';
+    document.getElementById('saleSubmitBtn').textContent = 'Log sale';
+    document.getElementById('saleBatch').disabled = false;
+    document.getElementById('saleDate').value = todayISO();
+    openModal('saleModal');
+  }
+  if (activeTab === 'expenses') {
+    editingExpenseId = null;
+    document.getElementById('expenseForm').reset();
+    document.getElementById('expenseModalTitle').textContent = 'New expense';
+    document.getElementById('expenseSubmitBtn').textContent = 'Log expense';
+    document.getElementById('expenseDate').value = todayISO();
+    openModal('expenseModal');
+  }
+  if (activeTab === 'income') {
+    editingIncomeId = null;
+    document.getElementById('incomeForm').reset();
+    document.getElementById('incomeModalTitle').textContent = 'New income';
+    document.getElementById('incomeSubmitBtn').textContent = 'Log income';
+    document.getElementById('incomeDate').value = todayISO();
+    openModal('incomeModal');
+  }
 });
 
 function openModal(id) { document.getElementById(id).classList.add('open'); }
@@ -121,13 +143,18 @@ function batchName(id) {
   return b ? b.batch_name : '—';
 }
 
+let editingSaleId = null;
+let editingExpenseId = null;
+let editingIncomeId = null;
+
 async function loadSales() {
   const rows = await api(`/farms/${farmId}/sales`);
+  window._salesCache = rows; // used by openEditSale to pre-fill the form without a second fetch
   const el = document.getElementById('salesTable');
   if (rows.length === 0) { el.innerHTML = '<p class="panel-empty">No sales logged yet.</p>'; return; }
   el.innerHTML = `
     <table class="fin-table">
-      <thead><tr><th>Date</th><th>Batch</th><th>Buyer</th><th>Qty</th><th>Payment</th><th style="text-align:right">Total</th></tr></thead>
+      <thead><tr><th>Date</th><th>Batch</th><th>Buyer</th><th>Qty</th><th>Payment</th><th style="text-align:right">Total</th><th></th></tr></thead>
       <tbody>
         ${rows.map(r => `
           <tr>
@@ -137,20 +164,57 @@ async function loadSales() {
             <td>${r.quantity}</td>
             <td><span class="cat-pill">${r.payment_method.replace('_', ' ')}</span></td>
             <td class="amt pos">${money(r.total_amount)}</td>
+            <td class="row-actions">
+              <button class="row-action-btn" title="Edit" data-edit-sale="${r.id}">✏️</button>
+              <button class="row-action-btn" title="Delete" data-delete-sale="${r.id}">🗑️</button>
+            </td>
           </tr>
         `).join('')}
       </tbody>
     </table>
   `;
+  el.querySelectorAll('[data-edit-sale]').forEach(btn => btn.addEventListener('click', () => openEditSale(btn.dataset.editSale)));
+  el.querySelectorAll('[data-delete-sale]').forEach(btn => btn.addEventListener('click', () => deleteSale(btn.dataset.deleteSale)));
+}
+
+function openEditSale(saleId) {
+  const sale = (window._salesCache || []).find(s => s.id === saleId);
+  if (!sale) return;
+  editingSaleId = saleId;
+  document.getElementById('saleModalTitle').textContent = 'Edit sale';
+  document.getElementById('saleSubmitBtn').textContent = 'Save changes';
+  document.getElementById('saleBatch').value = sale.batch_id || '';
+  document.getElementById('saleBatch').disabled = true; // batch can't change on edit — see routes/finance_routes.py's update_sale
+  document.getElementById('saleQuantity').value = sale.quantity;
+  document.getElementById('saleUnitPrice').value = sale.unit_price;
+  document.getElementById('saleDiscount').value = sale.discount;
+  document.getElementById('saleDate').value = sale.sale_date;
+  document.getElementById('saleBuyer').value = sale.buyer_name || '';
+  document.getElementById('salePayment').value = sale.payment_method;
+  document.getElementById('saleNotes').value = sale.notes || '';
+  document.getElementById('saleAlert').classList.remove('show');
+  openModal('saleModal');
+}
+
+async function deleteSale(saleId) {
+  if (!confirm('Delete this sale? Any stock it removed from a batch will be restored.')) return;
+  try {
+    await api(`/farms/${farmId}/sales/${saleId}`, { method: 'DELETE' });
+    await loadSales(); await loadSummary();
+    batches = await api(`/farms/${farmId}/animals/batches`); // quantity_current changed
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
 async function loadExpenses() {
   const rows = await api(`/farms/${farmId}/expenses`);
+  window._expensesCache = rows;
   const el = document.getElementById('expensesTable');
   if (rows.length === 0) { el.innerHTML = '<p class="panel-empty">No expenses logged yet.</p>'; return; }
   el.innerHTML = `
     <table class="fin-table">
-      <thead><tr><th>Date</th><th>Category</th><th>Vendor</th><th style="text-align:right">Amount</th></tr></thead>
+      <thead><tr><th>Date</th><th>Category</th><th>Vendor</th><th style="text-align:right">Amount</th><th></th></tr></thead>
       <tbody>
         ${rows.map(r => `
           <tr>
@@ -158,20 +222,53 @@ async function loadExpenses() {
             <td><span class="cat-pill">${r.category.replace('_', ' ')}</span></td>
             <td>${r.vendor || '—'}</td>
             <td class="amt neg">${money(r.amount)}</td>
+            <td class="row-actions">
+              <button class="row-action-btn" title="Edit" data-edit-expense="${r.id}">✏️</button>
+              <button class="row-action-btn" title="Delete" data-delete-expense="${r.id}">🗑️</button>
+            </td>
           </tr>
         `).join('')}
       </tbody>
     </table>
   `;
+  el.querySelectorAll('[data-edit-expense]').forEach(btn => btn.addEventListener('click', () => openEditExpense(btn.dataset.editExpense)));
+  el.querySelectorAll('[data-delete-expense]').forEach(btn => btn.addEventListener('click', () => deleteExpense(btn.dataset.deleteExpense)));
+}
+
+function openEditExpense(expenseId) {
+  const expense = (window._expensesCache || []).find(e => e.id === expenseId);
+  if (!expense) return;
+  editingExpenseId = expenseId;
+  document.getElementById('expenseModalTitle').textContent = 'Edit expense';
+  document.getElementById('expenseSubmitBtn').textContent = 'Save changes';
+  document.getElementById('expenseCategory').value = expense.category;
+  document.getElementById('expenseAmount').value = expense.amount;
+  document.getElementById('expenseDate').value = expense.expense_date;
+  document.getElementById('expenseVendor').value = expense.vendor || '';
+  document.getElementById('expenseBatch').value = expense.batch_id || '';
+  document.getElementById('expenseNotes').value = expense.notes || '';
+  document.getElementById('expenseAlert').classList.remove('show');
+  openModal('expenseModal');
+}
+
+async function deleteExpense(expenseId) {
+  if (!confirm('Delete this expense?')) return;
+  try {
+    await api(`/farms/${farmId}/expenses/${expenseId}`, { method: 'DELETE' });
+    await loadExpenses(); await loadSummary();
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
 async function loadIncome() {
   const rows = await api(`/farms/${farmId}/income`);
+  window._incomeCache = rows;
   const el = document.getElementById('incomeTable');
   if (rows.length === 0) { el.innerHTML = '<p class="panel-empty">No other income logged yet.</p>'; return; }
   el.innerHTML = `
     <table class="fin-table">
-      <thead><tr><th>Date</th><th>Category</th><th>Notes</th><th style="text-align:right">Amount</th></tr></thead>
+      <thead><tr><th>Date</th><th>Category</th><th>Notes</th><th style="text-align:right">Amount</th><th></th></tr></thead>
       <tbody>
         ${rows.map(r => `
           <tr>
@@ -179,11 +276,41 @@ async function loadIncome() {
             <td><span class="cat-pill">${r.category.replace('_', ' ')}</span></td>
             <td>${r.notes || '—'}</td>
             <td class="amt pos">${money(r.amount)}</td>
+            <td class="row-actions">
+              <button class="row-action-btn" title="Edit" data-edit-income="${r.id}">✏️</button>
+              <button class="row-action-btn" title="Delete" data-delete-income="${r.id}">🗑️</button>
+            </td>
           </tr>
         `).join('')}
       </tbody>
     </table>
   `;
+  el.querySelectorAll('[data-edit-income]').forEach(btn => btn.addEventListener('click', () => openEditIncome(btn.dataset.editIncome)));
+  el.querySelectorAll('[data-delete-income]').forEach(btn => btn.addEventListener('click', () => deleteIncome(btn.dataset.deleteIncome)));
+}
+
+function openEditIncome(incomeId) {
+  const income = (window._incomeCache || []).find(i => i.id === incomeId);
+  if (!income) return;
+  editingIncomeId = incomeId;
+  document.getElementById('incomeModalTitle').textContent = 'Edit income';
+  document.getElementById('incomeSubmitBtn').textContent = 'Save changes';
+  document.getElementById('incomeCategory').value = income.category;
+  document.getElementById('incomeAmount').value = income.amount;
+  document.getElementById('incomeDate').value = income.income_date;
+  document.getElementById('incomeNotes').value = income.notes || '';
+  document.getElementById('incomeAlert').classList.remove('show');
+  openModal('incomeModal');
+}
+
+async function deleteIncome(incomeId) {
+  if (!confirm('Delete this income record?')) return;
+  try {
+    await api(`/farms/${farmId}/income/${incomeId}`, { method: 'DELETE' });
+    await loadIncome(); await loadSummary();
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
 async function loadSummary() {
@@ -206,28 +333,31 @@ document.getElementById('saleForm').addEventListener('submit', async (e) => {
   const btn = document.getElementById('saleSubmitBtn');
   btn.disabled = true; btn.textContent = 'Saving...';
   try {
-    await api(`/farms/${farmId}/sales`, {
-      method: 'POST',
-      body: {
-        batch_id: document.getElementById('saleBatch').value || null,
-        quantity: Number(document.getElementById('saleQuantity').value),
-        unit_price: Number(document.getElementById('saleUnitPrice').value),
-        discount: Number(document.getElementById('saleDiscount').value || 0),
-        sale_date: document.getElementById('saleDate').value,
-        buyer_name: document.getElementById('saleBuyer').value.trim() || null,
-        payment_method: document.getElementById('salePayment').value,
-        notes: document.getElementById('saleNotes').value.trim() || null,
-      },
-    });
+    const body = {
+      quantity: Number(document.getElementById('saleQuantity').value),
+      unit_price: Number(document.getElementById('saleUnitPrice').value),
+      discount: Number(document.getElementById('saleDiscount').value || 0),
+      sale_date: document.getElementById('saleDate').value,
+      buyer_name: document.getElementById('saleBuyer').value.trim() || null,
+      payment_method: document.getElementById('salePayment').value,
+      notes: document.getElementById('saleNotes').value.trim() || null,
+    };
+    if (editingSaleId) {
+      await api(`/farms/${farmId}/sales/${editingSaleId}`, { method: 'PATCH', body });
+    } else {
+      body.batch_id = document.getElementById('saleBatch').value || null;
+      await api(`/farms/${farmId}/sales`, { method: 'POST', body });
+    }
     closeModal('saleModal');
     document.getElementById('saleForm').reset();
+    document.getElementById('saleBatch').disabled = false;
     await loadSales(); await loadSummary();
     batches = await api(`/farms/${farmId}/animals/batches`); // quantity_current changed
   } catch (err) {
     alertBox.textContent = err.message;
     alertBox.classList.add('show');
   } finally {
-    btn.disabled = false; btn.textContent = 'Log sale';
+    btn.disabled = false; btn.textContent = editingSaleId ? 'Save changes' : 'Log sale';
   }
 });
 
@@ -238,17 +368,19 @@ document.getElementById('expenseForm').addEventListener('submit', async (e) => {
   const btn = document.getElementById('expenseSubmitBtn');
   btn.disabled = true; btn.textContent = 'Saving...';
   try {
-    await api(`/farms/${farmId}/expenses`, {
-      method: 'POST',
-      body: {
-        category: document.getElementById('expenseCategory').value,
-        amount: Number(document.getElementById('expenseAmount').value),
-        expense_date: document.getElementById('expenseDate').value,
-        vendor: document.getElementById('expenseVendor').value.trim() || null,
-        batch_id: document.getElementById('expenseBatch').value || null,
-        notes: document.getElementById('expenseNotes').value.trim() || null,
-      },
-    });
+    const body = {
+      category: document.getElementById('expenseCategory').value,
+      amount: Number(document.getElementById('expenseAmount').value),
+      expense_date: document.getElementById('expenseDate').value,
+      vendor: document.getElementById('expenseVendor').value.trim() || null,
+      batch_id: document.getElementById('expenseBatch').value || null,
+      notes: document.getElementById('expenseNotes').value.trim() || null,
+    };
+    if (editingExpenseId) {
+      await api(`/farms/${farmId}/expenses/${editingExpenseId}`, { method: 'PATCH', body });
+    } else {
+      await api(`/farms/${farmId}/expenses`, { method: 'POST', body });
+    }
     closeModal('expenseModal');
     document.getElementById('expenseForm').reset();
     await loadExpenses(); await loadSummary();
@@ -256,7 +388,7 @@ document.getElementById('expenseForm').addEventListener('submit', async (e) => {
     alertBox.textContent = err.message;
     alertBox.classList.add('show');
   } finally {
-    btn.disabled = false; btn.textContent = 'Log expense';
+    btn.disabled = false; btn.textContent = editingExpenseId ? 'Save changes' : 'Log expense';
   }
 });
 
@@ -267,15 +399,17 @@ document.getElementById('incomeForm').addEventListener('submit', async (e) => {
   const btn = document.getElementById('incomeSubmitBtn');
   btn.disabled = true; btn.textContent = 'Saving...';
   try {
-    await api(`/farms/${farmId}/income`, {
-      method: 'POST',
-      body: {
-        category: document.getElementById('incomeCategory').value,
-        amount: Number(document.getElementById('incomeAmount').value),
-        income_date: document.getElementById('incomeDate').value,
-        notes: document.getElementById('incomeNotes').value.trim() || null,
-      },
-    });
+    const body = {
+      category: document.getElementById('incomeCategory').value,
+      amount: Number(document.getElementById('incomeAmount').value),
+      income_date: document.getElementById('incomeDate').value,
+      notes: document.getElementById('incomeNotes').value.trim() || null,
+    };
+    if (editingIncomeId) {
+      await api(`/farms/${farmId}/income/${editingIncomeId}`, { method: 'PATCH', body });
+    } else {
+      await api(`/farms/${farmId}/income`, { method: 'POST', body });
+    }
     closeModal('incomeModal');
     document.getElementById('incomeForm').reset();
     await loadIncome(); await loadSummary();
@@ -283,7 +417,7 @@ document.getElementById('incomeForm').addEventListener('submit', async (e) => {
     alertBox.textContent = err.message;
     alertBox.classList.add('show');
   } finally {
-    btn.disabled = false; btn.textContent = 'Log income';
+    btn.disabled = false; btn.textContent = editingIncomeId ? 'Save changes' : 'Log income';
   }
 });
 

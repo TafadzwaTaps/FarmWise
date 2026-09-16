@@ -98,8 +98,23 @@ document.getElementById('entityTabs').addEventListener('click', async (e) => {
 });
 
 document.getElementById('addBtn').addEventListener('click', () => {
-  if (activeTab === 'purchases') { document.getElementById('pDate').value = todayISO(); openModal('purchaseModal'); }
-  if (activeTab === 'consumption') { document.getElementById('cDate').value = todayISO(); openModal('consumptionModal'); }
+  if (activeTab === 'purchases') {
+    editingPurchaseId = null;
+    document.getElementById('purchaseForm').reset();
+    document.getElementById('purchaseModalTitle').textContent = 'New feed purchase';
+    document.getElementById('purchaseSubmitBtn').textContent = 'Log purchase';
+    document.getElementById('pDate').value = todayISO();
+    openModal('purchaseModal');
+  }
+  if (activeTab === 'consumption') {
+    editingConsumptionId = null;
+    document.getElementById('consumptionForm').reset();
+    document.getElementById('consumptionModalTitle').textContent = 'Log feed consumption';
+    document.getElementById('consumptionSubmitBtn').textContent = 'Log consumption';
+    document.getElementById('cBatch').disabled = false;
+    document.getElementById('cDate').value = todayISO();
+    openModal('consumptionModal');
+  }
 });
 
 function openModal(id) { document.getElementById(id).classList.add('open'); }
@@ -116,13 +131,17 @@ function batchName(id) {
   return b ? b.batch_name : '—';
 }
 
+let editingPurchaseId = null;
+let editingConsumptionId = null;
+
 async function loadPurchases() {
   const rows = await api(`/farms/${farmId}/feed/purchases`);
+  window._purchasesCache = rows;
   const el = document.getElementById('purchasesTable');
   if (rows.length === 0) { el.innerHTML = '<p class="panel-empty">No feed purchases logged yet.</p>'; return; }
   el.innerHTML = `
     <table class="fin-table">
-      <thead><tr><th>Date</th><th>Feed type</th><th>Supplier</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit cost</th><th style="text-align:right">Total</th></tr></thead>
+      <thead><tr><th>Date</th><th>Feed type</th><th>Supplier</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit cost</th><th style="text-align:right">Total</th><th></th></tr></thead>
       <tbody>
         ${rows.map(r => `
           <tr>
@@ -132,20 +151,53 @@ async function loadPurchases() {
             <td class="amt">${kg(r.quantity_kg)}</td>
             <td class="amt">${money(r.unit_cost)}</td>
             <td class="amt">${money(r.total_cost)}</td>
+            <td class="row-actions">
+              <button class="row-action-btn" title="Edit" data-edit-purchase="${r.id}">✏️</button>
+              <button class="row-action-btn" title="Delete" data-delete-purchase="${r.id}">🗑️</button>
+            </td>
           </tr>
         `).join('')}
       </tbody>
     </table>
   `;
+  el.querySelectorAll('[data-edit-purchase]').forEach(btn => btn.addEventListener('click', () => openEditPurchase(btn.dataset.editPurchase)));
+  el.querySelectorAll('[data-delete-purchase]').forEach(btn => btn.addEventListener('click', () => deletePurchase(btn.dataset.deletePurchase)));
+}
+
+function openEditPurchase(purchaseId) {
+  const p = (window._purchasesCache || []).find(x => x.id === purchaseId);
+  if (!p) return;
+  editingPurchaseId = purchaseId;
+  document.getElementById('purchaseModalTitle').textContent = 'Edit feed purchase';
+  document.getElementById('purchaseSubmitBtn').textContent = 'Save changes';
+  document.getElementById('pFeedType').value = p.feed_type;
+  document.getElementById('pQuantity').value = p.quantity_kg;
+  document.getElementById('pUnitCost').value = p.unit_cost;
+  document.getElementById('pDate').value = p.purchase_date;
+  document.getElementById('pSupplier').value = p.supplier || '';
+  document.getElementById('pNotes').value = p.notes || '';
+  document.getElementById('purchaseAlert').classList.remove('show');
+  openModal('purchaseModal');
+}
+
+async function deletePurchase(purchaseId) {
+  if (!confirm('Delete this feed purchase?')) return;
+  try {
+    await api(`/farms/${farmId}/feed/purchases/${purchaseId}`, { method: 'DELETE' });
+    await loadPurchases(); await loadSummary();
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
 async function loadConsumption() {
   const rows = await api(`/farms/${farmId}/feed/consumption`);
+  window._consumptionCache = rows;
   const el = document.getElementById('consumptionTable');
   if (rows.length === 0) { el.innerHTML = '<p class="panel-empty">No feed consumption logged yet.</p>'; return; }
   el.innerHTML = `
     <table class="fin-table">
-      <thead><tr><th>Date</th><th>Feed type</th><th>Batch</th><th style="text-align:right">Qty</th></tr></thead>
+      <thead><tr><th>Date</th><th>Feed type</th><th>Batch</th><th style="text-align:right">Qty</th><th></th></tr></thead>
       <tbody>
         ${rows.map(r => `
           <tr>
@@ -153,11 +205,43 @@ async function loadConsumption() {
             <td>${r.feed_type}</td>
             <td>${r.batch_id ? batchName(r.batch_id) : '—'}</td>
             <td class="amt">${kg(r.quantity_kg)}</td>
+            <td class="row-actions">
+              <button class="row-action-btn" title="Edit" data-edit-consumption="${r.id}">✏️</button>
+              <button class="row-action-btn" title="Delete" data-delete-consumption="${r.id}">🗑️</button>
+            </td>
           </tr>
         `).join('')}
       </tbody>
     </table>
   `;
+  el.querySelectorAll('[data-edit-consumption]').forEach(btn => btn.addEventListener('click', () => openEditConsumption(btn.dataset.editConsumption)));
+  el.querySelectorAll('[data-delete-consumption]').forEach(btn => btn.addEventListener('click', () => deleteConsumption(btn.dataset.deleteConsumption)));
+}
+
+function openEditConsumption(recordId) {
+  const c = (window._consumptionCache || []).find(x => x.id === recordId);
+  if (!c) return;
+  editingConsumptionId = recordId;
+  document.getElementById('consumptionModalTitle').textContent = 'Edit feed consumption';
+  document.getElementById('consumptionSubmitBtn').textContent = 'Save changes';
+  document.getElementById('cBatch').value = c.batch_id || '';
+  document.getElementById('cBatch').disabled = true; // batch isn't editable — see routes/feed_routes.py's FeedConsumptionUpdate
+  document.getElementById('cFeedType').value = c.feed_type;
+  document.getElementById('cQuantity').value = c.quantity_kg;
+  document.getElementById('cDate').value = c.date;
+  document.getElementById('cNotes').value = c.notes || '';
+  document.getElementById('consumptionAlert').classList.remove('show');
+  openModal('consumptionModal');
+}
+
+async function deleteConsumption(recordId) {
+  if (!confirm('Delete this feed consumption record?')) return;
+  try {
+    await api(`/farms/${farmId}/feed/consumption/${recordId}`, { method: 'DELETE' });
+    await loadConsumption(); await loadSummary();
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
 async function loadSummary() {
@@ -177,17 +261,19 @@ document.getElementById('purchaseForm').addEventListener('submit', async (e) => 
   const btn = document.getElementById('purchaseSubmitBtn');
   btn.disabled = true; btn.textContent = 'Saving...';
   try {
-    await api(`/farms/${farmId}/feed/purchases`, {
-      method: 'POST',
-      body: {
-        feed_type: document.getElementById('pFeedType').value.trim(),
-        quantity_kg: Number(document.getElementById('pQuantity').value),
-        unit_cost: Number(document.getElementById('pUnitCost').value),
-        purchase_date: document.getElementById('pDate').value,
-        supplier: document.getElementById('pSupplier').value.trim() || null,
-        notes: document.getElementById('pNotes').value.trim() || null,
-      },
-    });
+    const body = {
+      feed_type: document.getElementById('pFeedType').value.trim(),
+      quantity_kg: Number(document.getElementById('pQuantity').value),
+      unit_cost: Number(document.getElementById('pUnitCost').value),
+      purchase_date: document.getElementById('pDate').value,
+      supplier: document.getElementById('pSupplier').value.trim() || null,
+      notes: document.getElementById('pNotes').value.trim() || null,
+    };
+    if (editingPurchaseId) {
+      await api(`/farms/${farmId}/feed/purchases/${editingPurchaseId}`, { method: 'PATCH', body });
+    } else {
+      await api(`/farms/${farmId}/feed/purchases`, { method: 'POST', body });
+    }
     closeModal('purchaseModal');
     document.getElementById('purchaseForm').reset();
     await loadPurchases(); await loadSummary();
@@ -195,7 +281,7 @@ document.getElementById('purchaseForm').addEventListener('submit', async (e) => 
     alertBox.textContent = err.message;
     alertBox.classList.add('show');
   } finally {
-    btn.disabled = false; btn.textContent = 'Log purchase';
+    btn.disabled = false; btn.textContent = editingPurchaseId ? 'Save changes' : 'Log purchase';
   }
 });
 
@@ -206,24 +292,27 @@ document.getElementById('consumptionForm').addEventListener('submit', async (e) 
   const btn = document.getElementById('consumptionSubmitBtn');
   btn.disabled = true; btn.textContent = 'Saving...';
   try {
-    await api(`/farms/${farmId}/feed/consumption`, {
-      method: 'POST',
-      body: {
-        batch_id: document.getElementById('cBatch').value || null,
-        feed_type: document.getElementById('cFeedType').value.trim(),
-        quantity_kg: Number(document.getElementById('cQuantity').value),
-        date: document.getElementById('cDate').value,
-        notes: document.getElementById('cNotes').value.trim() || null,
-      },
-    });
+    const body = {
+      feed_type: document.getElementById('cFeedType').value.trim(),
+      quantity_kg: Number(document.getElementById('cQuantity').value),
+      date: document.getElementById('cDate').value,
+      notes: document.getElementById('cNotes').value.trim() || null,
+    };
+    if (editingConsumptionId) {
+      await api(`/farms/${farmId}/feed/consumption/${editingConsumptionId}`, { method: 'PATCH', body });
+    } else {
+      body.batch_id = document.getElementById('cBatch').value || null;
+      await api(`/farms/${farmId}/feed/consumption`, { method: 'POST', body });
+    }
     closeModal('consumptionModal');
     document.getElementById('consumptionForm').reset();
+    document.getElementById('cBatch').disabled = false;
     await loadConsumption(); await loadSummary();
   } catch (err) {
     alertBox.textContent = err.message;
     alertBox.classList.add('show');
   } finally {
-    btn.disabled = false; btn.textContent = 'Log consumption';
+    btn.disabled = false; btn.textContent = editingConsumptionId ? 'Save changes' : 'Log consumption';
   }
 });
 

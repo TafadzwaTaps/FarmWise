@@ -212,18 +212,18 @@ POST/GET/PATCH/DELETE /api/v1/farms[/{farm_id}]
 GET  /api/v1/farms/{farm_id}/members
 POST/PATCH/DELETE /api/v1/farms/{farm_id}/members[/{member_id}]   (team management, added post-Phase-9 — AUDIT.md; farmer role only, owner protected)
 
-POST/GET /api/v1/farms/{farm_id}/animals/batches[/{batch_id}]
-POST/GET /api/v1/farms/{farm_id}/animals/batches/{batch_id}/mortality
-POST/GET /api/v1/farms/{farm_id}/animals/batches/{batch_id}/medication
+POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/animals/batches[/{batch_id}]   (DELETE soft-deletes — AUDIT.md FWA-033)
+POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/animals/batches/{batch_id}/mortality[/{record_id}]   (quantity not editable — delete restores stock)
+POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/animals/batches/{batch_id}/medication[/{record_id}]
 GET      /api/v1/farms/{farm_id}/animals/batches/{batch_id}/profit    (added — AUDIT.md FWA-006)
 
-POST/GET /api/v1/farms/{farm_id}/feed/purchases
-POST/GET /api/v1/farms/{farm_id}/feed/consumption
+POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/feed/purchases[/{purchase_id}]
+POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/feed/consumption[/{record_id}]   (batch_id not editable)
 GET      /api/v1/farms/{farm_id}/feed/cost-summary
 
-POST/GET /api/v1/farms/{farm_id}/sales      (POST accepts an optional Idempotency-Key header — AUDIT.md FWA-007)
-POST/GET /api/v1/farms/{farm_id}/expenses   (POST accepts an optional batch_id to attribute the expense to a batch)
-POST/GET /api/v1/farms/{farm_id}/income
+POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/sales[/{sale_id}]      (POST accepts an optional Idempotency-Key header — AUDIT.md FWA-007; PATCH/DELETE reconcile batch stock — FWA-033)
+POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/expenses[/{expense_id}]   (POST/PATCH accept an optional batch_id to attribute the expense to a batch)
+POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/income[/{income_id}]
 GET      /api/v1/farms/{farm_id}/finance-summary
 
 POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/inventory[/{item_id}]

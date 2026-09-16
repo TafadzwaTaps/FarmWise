@@ -1710,3 +1710,148 @@ noted above. If the farm's actual owner needs to hand off the farm
 entirely (e.g. genuinely leaving the business), that's a distinct,
 higher-stakes operation deserving its own explicit confirmation flow,
 not a side effect of the team-management PATCH.
+
+---
+
+# Post-Phase-9, continued — Closing the real CRUD gap
+
+The user reported "no CRUD operations... no UI CRUD operation visible."
+Investigated properly rather than assuming the report was mistaken:
+built a real jsdom-based runtime harness (not just `node --check`, which
+only catches syntax errors — the exact class of bug that slipped through
+in the previous round) that loads each page's actual HTML and executes
+its actual JS against a simulated backend, and confirmed all 10 pages
+render correctly with zero runtime errors under a working connection.
+That ruled out "the app is silently broken" — but it also led straight
+to the real, valid version of the complaint.
+
+### FWA-033 — Nearly every transactional entity had Create + List but no Update or Delete
+**Severity:** High · **Status:** FIXED
+
+Confirmed by reading the actual route files, not assumption: `sales`,
+`expenses`, `income`, `feed_purchases`, `feed_consumption`,
+`mortality_records`, `medication_records`, and `animal_batches`
+themselves all had `POST` and `GET` only. A user who made a typo on any
+sale, expense, feed purchase, or the batch's own name/purchase cost had
+no way to fix it — not a misunderstanding, a real and significant gap
+matching the report exactly.
+
+**Fix — full backend CRUD for all eight entities**, 16 new endpoints:
+
+- **Sales** — the one genuinely tricky case, since a sale decrements a
+  batch's live stock at creation time. `PATCH` recomputes `total_amount`
+  when quantity/price/discount change and reconciles the batch's stock
+  by the *delta* (not the raw new value) if quantity changes; `DELETE`
+  restores the full quantity sold. `batch_id` is deliberately not
+  editable — moving a sale to a different batch means reconciling stock
+  on two batches, a bigger operation than fixing a typo; the documented
+  correct fix is delete-and-recreate, since each already reconciles its
+  own batch correctly.
+- **Mortality records** — same pattern: `quantity` isn't editable
+  (deleting and recreating handles a wrong number correctly); `DELETE`
+  restores the stock the record removed. Date/cause/notes are freely
+  editable since they don't touch stock.
+- **Animal batches** — `PATCH` for name/breed/purchase cost/supplier/
+  dates/notes; `species` and `quantity_initial`/`quantity_current`
+  are deliberately excluded (species defines what the batch fundamentally
+  is; quantity only ever changes through the stock-reconciling paths).
+  `DELETE` **soft**-deletes using the schema's `deleted_at` column,
+  which already existed for exactly this but had never been wired to a
+  route (flagged as a known gap back in Phase 3) — history
+  (sales/mortality/medication/feed-consumption rows) is left alone and
+  stays queryable by id.
+- **Expenses, income, feed purchases, feed consumption, medication
+  records** — straightforward `PATCH`/`DELETE`, no stock side effects.
+  Feed purchases' `PATCH` recomputes `total_cost` when quantity/unit
+  cost change, same principle as sales.
+
+**A genuine correctness bug found and fixed while building this, not a
+new one introduced:** `decrement_batch_quantity` (built in Phase 1) has
+been subtly wrong since it was written. Its WHERE-clause guard
+(`quantity_current >= amount`) correctly stopped stock from going
+negative under concurrent writes, but did **not** stop a *lost update*:
+if two concurrent decrements each individually passed their own
+sufficiency check, the second to commit would still write its own
+stale pre-read value, silently discarding the first decrement's effect
+— e.g. a batch at 10 with two concurrent sales of 3 each could both
+"succeed" but leave the batch at 7 instead of the correct 4. This was
+never caught before because nothing had previously reused the function
+in a way that exposed it; it surfaced while wiring sale/mortality
+deletion to restore stock via the same function with a negative amount.
+Rewrote it using the same optimistic-concurrency pattern already
+proven correct in `crud/inventory.py`'s `adjust_stock` (guard on
+`updated_at`, retry on a lost race), preserving the exact same function
+signature and external behavior. A batch that auto-closed at zero and
+then has stock restored (a deleted sale/mortality record) now correctly
+reopens — a "closed" batch with a positive headcount was an
+inconsistent state that literally could not happen before this pass
+added stock-restoring callers.
+
+**A second, unrelated bug found and fixed in the process:** a genuinely
+obscure Python gotcha. Two new `PATCH` schemas needed a field literally
+named `date` (matching its own type, `datetime.date`) with a default
+value — `date: date | None = None` — which crashes at class-definition
+time with `TypeError: unsupported operand type(s) for |: 'NoneType' and
+'NoneType'`. Reproduced it in isolation to confirm the cause before
+fixing: Python's bytecode for an annotated assignment with a default
+evaluates the default assignment *before* the annotation expression, so
+by the time `date | None` is evaluated, the name `date` has already
+been rebound to `None` in the class's own namespace, self-shadowing the
+imported type. Fixed with a type-only import alias
+(`from datetime import date as _date`) used just for the annotation —
+confirmed the actual field name (and JSON key) stays `"date"`,
+unaffected.
+
+**Verification:** `tests/test_crud_completeness.py` (24 tests) covers
+every new endpoint, with the heaviest scrutiny on the stock-reconciling
+paths — quantity decrease gives back the right delta, quantity increase
+takes the right delta and can still fail cleanly on insufficient stock,
+`batch_id` is confirmed unreachable through the update schema, and
+delete restores the full original quantity. `tests/test_stock_concurrency.py`
+was updated for the rewritten `decrement_batch_quantity` (3 existing
+tests adapted, 4 new ones added) — including a test that specifically
+reproduces the lost-update scenario from the docstring and asserts the
+*correct* final quantity, not just that some update happened. **123
+tests passing overall**, up from 99 at the end of the previous round.
+
+### Frontend: edit/delete UI added for the three highest-traffic pages
+**Status:** FIXED for finance.js, feed.js, animals.js — see note below on remaining pages
+
+- **`finance.js`** — sales, expenses, and income tables now have ✏️/🗑️
+  actions per row, reusing the existing create modals in an edit mode
+  (pre-filled, `PATCH` instead of `POST`, `batch_id` locked on sales).
+- **`feed.js`** — same pattern for purchases and consumption.
+- **`animals.js`** — batch info edit/delete (manager-role gated,
+  matching the backend), plus delete buttons on mortality and
+  medication records in the batch detail view. Mortality/medication
+  edit forms weren't built this pass (delete-and-recreate covers the
+  "I made a mistake" case; a dedicated edit form for cause/notes or
+  dosage/cost is a smaller, lower-priority follow-up).
+
+**Verification methodology, upgraded this round:** installed `jsdom`
+and built a real runtime test harness (`frontend_test/run_page.js`)
+that loads each page's actual HTML, mocks a working backend, and
+executes the actual JS in a simulated browser — not just a syntax
+check. This is a direct response to the previous round's lesson: a
+`const` temporal-dead-zone bug passed `node --check` cleanly while
+crashing every single page load in a real browser. Ran this against
+all 10 pages with realistic non-empty data (not just empty-list
+happy paths) and zero runtime errors were found. For `animals.js`
+specifically, went one step further and scripted an actual interaction
+(open a batch's detail view, click Edit, confirm the form pre-fills
+and `species` locks) rather than only checking that the page loads.
+
+### Explicitly not done this pass, stated plainly
+- **Inventory items, workers, and field reports already had full CRUD**
+  before this pass (built in earlier rounds) — confirmed, not touched
+  again unnecessarily.
+- **Mortality and medication records only got Delete, not a dedicated
+  Edit form** in the UI (the backend supports both). Delete-and-recreate
+  is a reasonable interim path; a proper edit form is a quick, low-risk
+  follow-up using the same pattern already established three times over
+  in this pass.
+- **No code was deleted or rewritten beyond what was needed** — every
+  addition in this pass is new functions/routes/UI alongside what
+  already existed; the one exception (`decrement_batch_quantity`'s
+  internals) was a correctness fix to existing code that kept its exact
+  external signature and contract, not a design change.

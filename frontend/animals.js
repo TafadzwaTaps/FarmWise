@@ -77,6 +77,7 @@ const CURRENCY_SYMBOLS = { USD: '$', ZAR: 'R', ZWL: 'Z$', ZWG: 'ZiG ', ZMW: 'ZK 
 let currentCurrency = 'USD';
 let currentRole = null;
 const FINANCE_VIEW_ROLES = ['farmer', 'farm_manager', 'accountant']; // matches backend's FINANCE_VIEW_ROLES / _FINANCE_VIEW_ROLES — batch profit is financial data
+const MANAGE_ROLES = ['farmer', 'farm_manager']; // matches backend's _MANAGE_ROLES — batch edit/delete is manager-only
 function money(n) {
   const symbol = CURRENCY_SYMBOLS[currentCurrency] || (currentCurrency + ' ');
   return symbol + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -152,39 +153,104 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(overlay.id); });
 });
 
-document.getElementById('newBatchBtn').addEventListener('click', () => openModal('createModal'));
-document.getElementById('emptyNewBatchBtn').addEventListener('click', () => openModal('createModal'));
+document.getElementById('newBatchBtn').addEventListener('click', () => openCreateBatchModal());
+document.getElementById('emptyNewBatchBtn').addEventListener('click', () => openCreateBatchModal());
+
+let editingBatchId = null;
+
+function openCreateBatchModal() {
+  editingBatchId = null;
+  document.getElementById('createForm').reset();
+  document.getElementById('createModalTitle').textContent = 'New animal batch';
+  document.getElementById('createSubmitBtn').textContent = 'Create batch';
+  document.getElementById('species').disabled = false;
+  document.getElementById('quantityInitial').disabled = false;
+  document.getElementById('createAlert').classList.remove('show');
+  openModal('createModal');
+}
+
+function openEditBatchModal(batch) {
+  editingBatchId = batch.id;
+  document.getElementById('createModalTitle').textContent = 'Edit batch info';
+  document.getElementById('createSubmitBtn').textContent = 'Save changes';
+  document.getElementById('batchName').value = batch.batch_name;
+  document.getElementById('species').value = batch.species;
+  document.getElementById('species').disabled = true; // not editable after creation — see crud/animals.py's update_batch
+  document.getElementById('breed').value = batch.breed || '';
+  document.getElementById('quantityInitial').value = batch.quantity_initial;
+  document.getElementById('quantityInitial').disabled = true; // only ever changes via sales/mortality, not a direct edit
+  document.getElementById('purchaseDate').value = batch.purchase_date || '';
+  document.getElementById('purchasePriceTotal').value = batch.purchase_price_total ?? '';
+  document.getElementById('supplier').value = batch.supplier || '';
+  document.getElementById('averageWeightKg').value = batch.average_weight_kg ?? '';
+  document.getElementById('expectedSellingDate').value = batch.expected_selling_date || '';
+  document.getElementById('notes').value = batch.notes || '';
+  document.getElementById('createAlert').classList.remove('show');
+  closeModal('detailModal');
+  openModal('createModal');
+}
+
+document.getElementById('editBatchBtn').addEventListener('click', () => {
+  const batch = allBatches.find(b => b.id === activeBatchId);
+  if (batch) openEditBatchModal(batch);
+});
+
+document.getElementById('deleteBatchBtn').addEventListener('click', async () => {
+  if (!confirm('Delete this batch? Its sales, mortality, and medication history is kept for your records, but the batch itself will no longer appear in your lists.')) return;
+  try {
+    await api(`/farms/${farmId}/animals/batches/${activeBatchId}`, { method: 'DELETE' });
+    closeModal('detailModal');
+    await loadBatches();
+  } catch (err) {
+    alert(err.message);
+  }
+});
 
 document.getElementById('createForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const alertBox = document.getElementById('createAlert');
   alertBox.classList.remove('show');
   const btn = document.getElementById('createSubmitBtn');
-  btn.disabled = true; btn.textContent = 'Creating...';
-
-  const payload = {
-    batch_name: document.getElementById('batchName').value.trim(),
-    species: document.getElementById('species').value,
-    breed: document.getElementById('breed').value.trim() || null,
-    quantity_initial: Number(document.getElementById('quantityInitial').value),
-    purchase_date: document.getElementById('purchaseDate').value || null,
-    purchase_price_total: document.getElementById('purchasePriceTotal').value ? Number(document.getElementById('purchasePriceTotal').value) : null,
-    supplier: document.getElementById('supplier').value.trim() || null,
-    average_weight_kg: document.getElementById('averageWeightKg').value ? Number(document.getElementById('averageWeightKg').value) : null,
-    expected_selling_date: document.getElementById('expectedSellingDate').value || null,
-    notes: document.getElementById('notes').value.trim() || null,
-  };
+  btn.disabled = true; btn.textContent = editingBatchId ? 'Saving...' : 'Creating...';
 
   try {
-    await api(`/farms/${farmId}/animals/batches`, { method: 'POST', body: payload });
+    if (editingBatchId) {
+      const payload = {
+        batch_name: document.getElementById('batchName').value.trim(),
+        breed: document.getElementById('breed').value.trim() || null,
+        purchase_date: document.getElementById('purchaseDate').value || null,
+        purchase_price_total: document.getElementById('purchasePriceTotal').value ? Number(document.getElementById('purchasePriceTotal').value) : null,
+        supplier: document.getElementById('supplier').value.trim() || null,
+        average_weight_kg: document.getElementById('averageWeightKg').value ? Number(document.getElementById('averageWeightKg').value) : null,
+        expected_selling_date: document.getElementById('expectedSellingDate').value || null,
+        notes: document.getElementById('notes').value.trim() || null,
+      };
+      await api(`/farms/${farmId}/animals/batches/${editingBatchId}`, { method: 'PATCH', body: payload });
+    } else {
+      const payload = {
+        batch_name: document.getElementById('batchName').value.trim(),
+        species: document.getElementById('species').value,
+        breed: document.getElementById('breed').value.trim() || null,
+        quantity_initial: Number(document.getElementById('quantityInitial').value),
+        purchase_date: document.getElementById('purchaseDate').value || null,
+        purchase_price_total: document.getElementById('purchasePriceTotal').value ? Number(document.getElementById('purchasePriceTotal').value) : null,
+        supplier: document.getElementById('supplier').value.trim() || null,
+        average_weight_kg: document.getElementById('averageWeightKg').value ? Number(document.getElementById('averageWeightKg').value) : null,
+        expected_selling_date: document.getElementById('expectedSellingDate').value || null,
+        notes: document.getElementById('notes').value.trim() || null,
+      };
+      await api(`/farms/${farmId}/animals/batches`, { method: 'POST', body: payload });
+    }
     closeModal('createModal');
     document.getElementById('createForm').reset();
+    document.getElementById('species').disabled = false;
+    document.getElementById('quantityInitial').disabled = false;
     await loadBatches();
   } catch (err) {
     alertBox.textContent = err.message;
     alertBox.classList.add('show');
   } finally {
-    btn.disabled = false; btn.textContent = 'Create batch';
+    btn.disabled = false; btn.textContent = editingBatchId ? 'Save changes' : 'Create batch';
   }
 });
 
@@ -214,6 +280,7 @@ async function openDetail(batchId) {
   document.getElementById('mDate').value = new Date().toISOString().slice(0, 10);
   document.getElementById('mortalityAlert').classList.remove('show');
   document.getElementById('medicationAlert').classList.remove('show');
+  document.getElementById('detailBatchActions').style.display = MANAGE_ROLES.includes(currentRole) ? 'flex' : 'none';
 
   openModal('detailModal');
 
@@ -271,8 +338,24 @@ async function loadMortality(batchId) {
             ${r.cause ? `<div class="record-row-sub">${r.cause}</div>` : ''}
           </div>
           <span class="record-row-date">${fmtDate(r.date)}</span>
+          <button class="record-row-delete" title="Delete (restores the batch's stock)" data-delete-mortality="${r.id}">🗑️</button>
         </div>
       `).join('');
+  list.querySelectorAll('[data-delete-mortality]').forEach(btn => {
+    btn.addEventListener('click', () => deleteMortality(btn.dataset.deleteMortality));
+  });
+}
+
+async function deleteMortality(recordId) {
+  if (!confirm('Delete this mortality record? The animals will be added back to the batch\'s live count.')) return;
+  try {
+    await api(`/farms/${farmId}/animals/batches/${activeBatchId}/mortality/${recordId}`, { method: 'DELETE' });
+    await loadMortality(activeBatchId);
+    allBatches = await api(`/farms/${farmId}/animals/batches`); // quantity_current changed
+    renderBatches();
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
 async function loadMedication(batchId) {
@@ -287,8 +370,22 @@ async function loadMedication(batchId) {
             <div class="record-row-sub">${r.type}${r.next_due_date ? ' · next due ' + fmtDate(r.next_due_date) : ''}</div>
           </div>
           <span class="record-row-date">${fmtDate(r.date_administered)}</span>
+          <button class="record-row-delete" title="Delete" data-delete-medication="${r.id}">🗑️</button>
         </div>
       `).join('');
+  list.querySelectorAll('[data-delete-medication]').forEach(btn => {
+    btn.addEventListener('click', () => deleteMedication(btn.dataset.deleteMedication));
+  });
+}
+
+async function deleteMedication(recordId) {
+  if (!confirm('Delete this medication record?')) return;
+  try {
+    await api(`/farms/${farmId}/animals/batches/${activeBatchId}/medication/${recordId}`, { method: 'DELETE' });
+    await loadMedication(activeBatchId);
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
 document.getElementById('mortalityForm').addEventListener('submit', async (e) => {

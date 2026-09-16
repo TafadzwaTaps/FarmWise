@@ -88,7 +88,7 @@
 <div class="modal-overlay" id="createModal">
   <div class="modal">
     <div class="modal-header">
-      <h2>New animal batch</h2>
+      <h2 id="createModalTitle">New animal batch</h2>
       <button class="modal-close" data-close="createModal">✕</button>
     </div>
     <div class="alert alert--error" id="createAlert"></div>
@@ -143,7 +143,11 @@
       <button class="modal-close" data-close="detailModal">✕</button>
     </div>
 
-    <div id="detailOverview" style="margin-bottom:18px;font-size:13px;color:var(--text-dim)"></div>
+    <div id="detailOverview" style="margin-bottom:8px;font-size:13px;color:var(--text-dim)"></div>
+    <div id="detailBatchActions" style="margin-bottom:18px;display:none">
+      <button type="button" class="btn btn--outline btn--sm" id="editBatchBtn">Edit batch info</button>
+      <button type="button" class="btn btn--danger btn--sm" id="deleteBatchBtn">Delete batch</button>
+    </div>
 
     <div class="tabs">
       <div class="tab active" data-tab="mortality">Mortality</div>

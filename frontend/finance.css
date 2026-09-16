@@ -82,6 +82,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);}
 .fin-table .amt{font-family:var(--mono);text-align:right;}
 .fin-table .amt.pos{color:var(--green);}
 .fin-table .amt.neg{color:var(--mango);}
+.fin-table .row-actions{white-space:nowrap;text-align:right;}
+.fin-table .row-action-btn{background:none;border:none;cursor:pointer;font-size:13px;padding:4px 6px;
+  border-radius:6px;opacity:.6;}
+.fin-table .row-action-btn:hover{opacity:1;background:var(--surface2);}
 .cat-pill{font-family:var(--mono);font-size:10px;font-weight:700;padding:4px 9px;border-radius:999px;
   background:var(--surface2);color:var(--text-dim);text-transform:capitalize;}
 

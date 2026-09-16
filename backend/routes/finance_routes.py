@@ -41,6 +41,18 @@ class SaleCreate(BaseModel):
     notes: str | None = None
 
 
+class SaleUpdate(BaseModel):
+    """batch_id is deliberately absent — see crud.update_sale's docstring
+    for why moving a sale to a different batch isn't supported here."""
+    buyer_name: str | None = None
+    quantity: int | None = Field(default=None, gt=0)
+    unit_price: float | None = Field(default=None, ge=0)
+    discount: float | None = Field(default=None, ge=0)
+    payment_method: PaymentMethod | None = None
+    sale_date: date | None = None
+    notes: str | None = None
+
+
 class ExpenseCreate(BaseModel):
     category: ExpenseCategory
     amount: float = Field(gt=0)
@@ -50,10 +62,26 @@ class ExpenseCreate(BaseModel):
     notes: str | None = None
 
 
+class ExpenseUpdate(BaseModel):
+    category: ExpenseCategory | None = None
+    amount: float | None = Field(default=None, gt=0)
+    expense_date: date | None = None
+    vendor: str | None = None
+    batch_id: str | None = None
+    notes: str | None = None
+
+
 class IncomeCreate(BaseModel):
     category: IncomeCategory
     amount: float = Field(gt=0)
     income_date: date
+    notes: str | None = None
+
+
+class IncomeUpdate(BaseModel):
+    category: IncomeCategory | None = None
+    amount: float | None = Field(default=None, gt=0)
+    income_date: date | None = None
     notes: str | None = None
 
 
@@ -112,6 +140,54 @@ def list_sales(farm_id: str, _member: dict = Depends(require_farm_role())):
     return crud.list_sales(farm_id)
 
 
+@router.patch("/sales/{sale_id}")
+def update_sale(farm_id: str, sale_id: str, data: SaleUpdate, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
+    sale = crud.get_sale(farm_id, sale_id)
+    if sale is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Sale not found")
+
+    fields = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing to update")
+    if "sale_date" in fields:
+        fields["sale_date"] = fields["sale_date"].isoformat()
+
+    if "quantity" in fields and sale["batch_id"]:
+        # The sale already decremented the batch by its OLD quantity at
+        # creation time — reconcile by the delta, not the new value
+        # outright. old=5,new=3 → give back 2. old=5,new=8 → take 3 more
+        # (and can still fail with "not enough stock" if there isn't any,
+        # same atomic guard as a brand-new sale).
+        batch = crud.get_batch(farm_id, sale["batch_id"])
+        if batch is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "This sale's batch no longer exists")
+        delta = sale["quantity"] - fields["quantity"]  # positive = give back, negative = take more
+        try:
+            crud.decrement_batch_quantity(batch, -delta)
+        except ValueError:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"Cannot change quantity to {fields['quantity']} — only {batch['quantity_current']} remain in this batch.",
+            )
+
+    updated = crud.update_sale(farm_id, sale_id, fields)
+    return updated
+
+
+@router.delete("/sales/{sale_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_sale(farm_id: str, sale_id: str, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
+    sale = crud.get_sale(farm_id, sale_id)
+    if sale is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Sale not found")
+    if sale["batch_id"]:
+        # Restore the stock this sale took — a deleted sale means those
+        # animals were never actually sold, from the batch's point of view.
+        batch = crud.get_batch(farm_id, sale["batch_id"])
+        if batch is not None:
+            crud.decrement_batch_quantity(batch, -sale["quantity"])  # negative amount = give back, see crud/animals.py
+    crud.delete_sale(farm_id, sale_id)
+
+
 # ── Expenses ─────────────────────────────────────────────────────────────
 
 @router.post("/expenses", status_code=status.HTTP_201_CREATED)
@@ -130,6 +206,27 @@ def list_expenses(farm_id: str, _member: dict = Depends(require_farm_role())):
     return crud.list_expenses(farm_id)
 
 
+@router.patch("/expenses/{expense_id}")
+def update_expense(farm_id: str, expense_id: str, data: ExpenseUpdate, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
+    if crud.get_expense(farm_id, expense_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Expense not found")
+    if data.batch_id and crud.get_batch(farm_id, data.batch_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
+    fields = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing to update")
+    if "expense_date" in fields:
+        fields["expense_date"] = fields["expense_date"].isoformat()
+    return crud.update_expense(farm_id, expense_id, fields)
+
+
+@router.delete("/expenses/{expense_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_expense(farm_id: str, expense_id: str, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
+    if crud.get_expense(farm_id, expense_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Expense not found")
+    crud.delete_expense(farm_id, expense_id)
+
+
 # ── Income ───────────────────────────────────────────────────────────────
 
 @router.post("/income", status_code=status.HTTP_201_CREATED)
@@ -142,6 +239,25 @@ def create_income(farm_id: str, data: IncomeCreate, _member: dict = Depends(requ
 @router.get("/income")
 def list_income(farm_id: str, _member: dict = Depends(require_farm_role())):
     return crud.list_income(farm_id)
+
+
+@router.patch("/income/{income_id}")
+def update_income(farm_id: str, income_id: str, data: IncomeUpdate, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
+    if crud.get_income(farm_id, income_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Income record not found")
+    fields = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing to update")
+    if "income_date" in fields:
+        fields["income_date"] = fields["income_date"].isoformat()
+    return crud.update_income(farm_id, income_id, fields)
+
+
+@router.delete("/income/{income_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_income(farm_id: str, income_id: str, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
+    if crud.get_income(farm_id, income_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Income record not found")
+    crud.delete_income(farm_id, income_id)
 
 
 # ── Dashboard summary ────────────────────────────────────────────────────
