@@ -204,18 +204,67 @@ def test_update_batch_info(client, make_token, membership_store):
     assert r.json()["batch_name"] == "New name"
 
 
-def test_cannot_update_batch_species_via_patch(client, make_token, membership_store):
-    """species isn't a field on AnimalBatchUpdate — attempting to change it
-    is just ignored (extra fields aren't rejected, but also never applied)."""
+def test_can_update_batch_species_via_patch(client, make_token, membership_store):
+    """AUDIT.md — species is now editable via the single batch-edit form,
+    matching the mobile app's UI exactly (a farmer correcting a
+    mis-entered species at creation time is a real, valid need — the
+    previous exclusion was a web-only design choice, not a data-
+    integrity requirement; species doesn't cascade into any other
+    table's constraints)."""
     headers = _auth(client, make_token, membership_store)
-    batch = {"id": "b1", "farm_id": FARM_A}
+    batch = {"id": "b1", "farm_id": FARM_A, "quantity_current": 10}
     with patch("routes.animal_routes.crud.get_batch", return_value=batch), \
          patch("routes.animal_routes.crud.update_batch", return_value=batch) as mocked:
         client.patch(f"/api/v1/farms/{FARM_A}/animals/batches/b1", headers=headers,
                      json={"breed": "Leghorn", "species": "cattle"})
     called_fields = mocked.call_args[0][2]
-    assert "species" not in called_fields
+    assert called_fields["species"] == "cattle"
     assert called_fields["breed"] == "Leghorn"
+
+
+def test_update_batch_quantity_current_uses_atomic_adjustment(client, make_token, membership_store):
+    """AUDIT.md — matching mobile's single edit form, quantity_current can
+    now be changed here too, but must still go through the same atomic,
+    race-safe path as every other stock change — never a raw overwrite."""
+    headers = _auth(client, make_token, membership_store)
+    batch = {"id": "b1", "farm_id": FARM_A, "quantity_current": 19, "updated_at": "t0"}
+    with patch("routes.animal_routes.crud.get_batch", return_value=batch), \
+         patch("routes.animal_routes.crud.decrement_batch_quantity", return_value={**batch, "quantity_current": 23}) as mocked_adjust:
+        r = client.patch(f"/api/v1/farms/{FARM_A}/animals/batches/b1", headers=headers, json={"quantity_current": 23})
+    assert r.status_code == 200
+    # 19 -> 23 is a delta of +4, i.e. decrement_batch_quantity(batch, -4)
+    mocked_adjust.assert_called_once_with(batch, -4)
+
+
+def test_update_batch_quantity_unchanged_skips_adjustment(client, make_token, membership_store):
+    """Submitting the form with the count left as-is shouldn't touch the
+    stock-adjustment path at all — matches mobile showing the current
+    value pre-filled and only 'changing' it if the user actually edits it."""
+    headers = _auth(client, make_token, membership_store)
+    batch = {"id": "b1", "farm_id": FARM_A, "quantity_current": 19, "updated_at": "t0"}
+    with patch("routes.animal_routes.crud.get_batch", return_value=batch), \
+         patch("routes.animal_routes.crud.decrement_batch_quantity") as mocked_adjust, \
+         patch("routes.animal_routes.crud.update_batch", return_value=batch):
+        r = client.patch(f"/api/v1/farms/{FARM_A}/animals/batches/b1", headers=headers,
+                          json={"quantity_current": 19, "breed": "Leghorn"})
+    assert r.status_code == 200
+    mocked_adjust.assert_not_called()
+
+
+def test_update_batch_explicit_status_overrides_auto_close(client, make_token, membership_store):
+    """If a quantity edit would auto-close the batch (hits zero) but the
+    same save also explicitly sets status, the explicit choice wins —
+    see update_batch's docstring."""
+    headers = _auth(client, make_token, membership_store)
+    batch = {"id": "b1", "farm_id": FARM_A, "quantity_current": 5, "updated_at": "t0"}
+    with patch("routes.animal_routes.crud.get_batch", return_value=batch), \
+         patch("routes.animal_routes.crud.decrement_batch_quantity", return_value={**batch, "quantity_current": 0, "status": "closed"}), \
+         patch("routes.animal_routes.crud.update_batch", return_value={**batch, "quantity_current": 0, "status": "active"}) as mocked_update:
+        r = client.patch(f"/api/v1/farms/{FARM_A}/animals/batches/b1", headers=headers,
+                          json={"quantity_current": 0, "status": "active"})
+    assert r.status_code == 200
+    called_fields = mocked_update.call_args[0][2]
+    assert called_fields["status"] == "active"
 
 
 def test_delete_batch_soft_deletes(client, make_token, membership_store):

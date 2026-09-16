@@ -130,6 +130,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);}
 .record-row-delete{background:none;border:none;cursor:pointer;font-size:12px;padding:4px 6px;
   border-radius:6px;opacity:.5;margin-left:8px;flex-shrink:0;}
 .record-row-delete:hover{opacity:1;background:var(--surface2);}
+.record-row-actions{display:flex;gap:14px;align-items:center;flex-shrink:0;}
+.record-row-link{background:none;border:none;cursor:pointer;font-size:12px;font-weight:700;padding:2px;}
+.record-row-link--edit{color:var(--green);}
+.record-row-link--delete{color:var(--red);}
+.record-row-link:hover{text-decoration:underline;}
 
 .divider{height:1px;background:var(--border);margin:18px 0;}
 .section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;

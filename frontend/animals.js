@@ -83,6 +83,7 @@ function money(n) {
   return symbol + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 function fmtDate(iso) { if (!iso) return '—'; return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }); }
+function escapeHtml(s) { const div = document.createElement('div'); div.textContent = s ?? ''; return div.innerHTML; }
 
 // ── Rendering ──────────────────────────────────────────────────────────
 
@@ -156,81 +157,50 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
 document.getElementById('newBatchBtn').addEventListener('click', () => openCreateBatchModal());
 document.getElementById('emptyNewBatchBtn').addEventListener('click', () => openCreateBatchModal());
 
-let editingBatchId = null;
-
 function openCreateBatchModal() {
-  editingBatchId = null;
   document.getElementById('createForm').reset();
-  document.getElementById('createModalTitle').textContent = 'New animal batch';
-  document.getElementById('createSubmitBtn').textContent = 'Create batch';
-  document.getElementById('species').disabled = false;
-  document.getElementById('quantityInitial').disabled = false;
   document.getElementById('createAlert').classList.remove('show');
   openModal('createModal');
 }
 
-function openEditBatchModal(batch) {
-  editingBatchId = batch.id;
-  document.getElementById('createModalTitle').textContent = 'Edit batch info';
-  document.getElementById('createSubmitBtn').textContent = 'Save changes';
-  document.getElementById('batchName').value = batch.batch_name;
-  document.getElementById('species').value = batch.species;
-  document.getElementById('species').disabled = true; // not editable after creation — see crud/animals.py's update_batch
-  document.getElementById('breed').value = batch.breed || '';
-  document.getElementById('quantityInitial').value = batch.quantity_initial;
-  document.getElementById('quantityInitial').disabled = true; // only ever changes via sales/mortality, not a direct edit
-  document.getElementById('purchaseDate').value = batch.purchase_date || '';
-  document.getElementById('purchasePriceTotal').value = batch.purchase_price_total ?? '';
-  document.getElementById('supplier').value = batch.supplier || '';
-  document.getElementById('averageWeightKg').value = batch.average_weight_kg ?? '';
-  document.getElementById('expectedSellingDate').value = batch.expected_selling_date || '';
-  document.getElementById('notes').value = batch.notes || '';
-  document.getElementById('createAlert').classList.remove('show');
-  closeModal('detailModal');
-  openModal('createModal');
-}
+// Editing/deleting a batch — and adjusting its live stock — now all live
+// inside the detail modal's "Edit" tab (matching the mobile app's single
+// edit form exactly), populated once when the modal opens in openDetail()
+// below rather than a separate modal reused in two modes.
 
-document.getElementById('editBatchBtn').addEventListener('click', () => {
-  const batch = allBatches.find(b => b.id === activeBatchId);
-  if (batch) openEditBatchModal(batch);
-});
-
-document.getElementById('adjustStockBtn').addEventListener('click', () => {
-  document.getElementById('adjustBatchForm').reset();
-  document.getElementById('adjustBatchAlert').classList.remove('show');
-  openModal('adjustBatchModal');
-});
-
-document.getElementById('adjustBatchForm').addEventListener('submit', async (e) => {
+document.getElementById('editBatchForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const alertBox = document.getElementById('adjustBatchAlert');
+  const alertBox = document.getElementById('editBatchAlert');
   alertBox.classList.remove('show');
-  const btn = document.getElementById('adjustBatchSubmitBtn');
-  const delta = Number(document.getElementById('adjustBatchDelta').value);
-  const reason = document.getElementById('adjustBatchReason').value.trim();
-  if (!delta) { alertBox.textContent = 'Enter a non-zero change.'; alertBox.classList.add('show'); return; }
-  btn.disabled = true; btn.textContent = 'Applying...';
+  const btn = document.getElementById('editBatchSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Saving...';
   try {
-    await api(`/farms/${farmId}/animals/batches/${activeBatchId}/adjust`, {
-      method: 'POST',
-      body: { delta, reason },
+    await api(`/farms/${farmId}/animals/batches/${activeBatchId}`, {
+      method: 'PATCH',
+      body: {
+        batch_name: document.getElementById('editBatchName').value.trim(),
+        species: document.getElementById('editSpecies').value,
+        breed: document.getElementById('editBreed').value.trim() || null,
+        quantity_current: Number(document.getElementById('editQuantityCurrent').value),
+        supplier: document.getElementById('editSupplier').value.trim() || null,
+        status: document.getElementById('editStatus').value,
+        notes: document.getElementById('editNotes').value.trim() || null,
+      },
     });
-    closeModal('adjustBatchModal');
     allBatches = await api(`/farms/${farmId}/animals/batches`);
     renderBatches();
     const batch = allBatches.find(b => b.id === activeBatchId);
     if (batch) {
-      document.getElementById('detailOverview').innerHTML = `
-        ${SPECIES_ICONS[batch.species] || '🐾'} ${batch.species.replace('_', ' ')}${batch.breed ? ' · ' + batch.breed : ''}
-        &nbsp;·&nbsp; <strong style="color:var(--text)">${batch.quantity_current}</strong> / ${batch.quantity_initial} remaining
-        &nbsp;·&nbsp; <span class="status-badge status-badge--${batch.status}">${batch.status}</span>
-      `;
+      document.getElementById('detailBatchName').textContent = batch.batch_name;
+      renderDetailOverview(batch);
+      populateEditTab(batch);
     }
+    showToast('Batch updated');
   } catch (err) {
     alertBox.textContent = err.message;
     alertBox.classList.add('show');
   } finally {
-    btn.disabled = false; btn.textContent = 'Apply';
+    btn.disabled = false; btn.textContent = 'Save changes';
   }
 });
 
@@ -250,46 +220,30 @@ document.getElementById('createForm').addEventListener('submit', async (e) => {
   const alertBox = document.getElementById('createAlert');
   alertBox.classList.remove('show');
   const btn = document.getElementById('createSubmitBtn');
-  btn.disabled = true; btn.textContent = editingBatchId ? 'Saving...' : 'Creating...';
+  btn.disabled = true; btn.textContent = 'Creating...';
 
   try {
-    if (editingBatchId) {
-      const payload = {
-        batch_name: document.getElementById('batchName').value.trim(),
-        breed: document.getElementById('breed').value.trim() || null,
-        purchase_date: document.getElementById('purchaseDate').value || null,
-        purchase_price_total: document.getElementById('purchasePriceTotal').value ? Number(document.getElementById('purchasePriceTotal').value) : null,
-        supplier: document.getElementById('supplier').value.trim() || null,
-        average_weight_kg: document.getElementById('averageWeightKg').value ? Number(document.getElementById('averageWeightKg').value) : null,
-        expected_selling_date: document.getElementById('expectedSellingDate').value || null,
-        notes: document.getElementById('notes').value.trim() || null,
-      };
-      await api(`/farms/${farmId}/animals/batches/${editingBatchId}`, { method: 'PATCH', body: payload });
-    } else {
-      const payload = {
-        batch_name: document.getElementById('batchName').value.trim(),
-        species: document.getElementById('species').value,
-        breed: document.getElementById('breed').value.trim() || null,
-        quantity_initial: Number(document.getElementById('quantityInitial').value),
-        purchase_date: document.getElementById('purchaseDate').value || null,
-        purchase_price_total: document.getElementById('purchasePriceTotal').value ? Number(document.getElementById('purchasePriceTotal').value) : null,
-        supplier: document.getElementById('supplier').value.trim() || null,
-        average_weight_kg: document.getElementById('averageWeightKg').value ? Number(document.getElementById('averageWeightKg').value) : null,
-        expected_selling_date: document.getElementById('expectedSellingDate').value || null,
-        notes: document.getElementById('notes').value.trim() || null,
-      };
-      await api(`/farms/${farmId}/animals/batches`, { method: 'POST', body: payload });
-    }
+    const payload = {
+      batch_name: document.getElementById('batchName').value.trim(),
+      species: document.getElementById('species').value,
+      breed: document.getElementById('breed').value.trim() || null,
+      quantity_initial: Number(document.getElementById('quantityInitial').value),
+      purchase_date: document.getElementById('purchaseDate').value || null,
+      purchase_price_total: document.getElementById('purchasePriceTotal').value ? Number(document.getElementById('purchasePriceTotal').value) : null,
+      supplier: document.getElementById('supplier').value.trim() || null,
+      average_weight_kg: document.getElementById('averageWeightKg').value ? Number(document.getElementById('averageWeightKg').value) : null,
+      expected_selling_date: document.getElementById('expectedSellingDate').value || null,
+      notes: document.getElementById('notes').value.trim() || null,
+    };
+    await api(`/farms/${farmId}/animals/batches`, { method: 'POST', body: payload });
     closeModal('createModal');
     document.getElementById('createForm').reset();
-    document.getElementById('species').disabled = false;
-    document.getElementById('quantityInitial').disabled = false;
     await loadBatches();
   } catch (err) {
     alertBox.textContent = err.message;
     alertBox.classList.add('show');
   } finally {
-    btn.disabled = false; btn.textContent = editingBatchId ? 'Save changes' : 'Create batch';
+    btn.disabled = false; btn.textContent = 'Create batch';
   }
 });
 
@@ -304,32 +258,55 @@ document.querySelectorAll('.tab').forEach(tab => {
   });
 });
 
+function renderDetailOverview(batch) {
+  document.getElementById('detailOverview').innerHTML = `
+    ${SPECIES_ICONS[batch.species] || '🐾'} ${batch.species.replace('_', ' ')}${batch.breed ? ' · ' + batch.breed : ''}
+    &nbsp;·&nbsp; <strong style="color:var(--text)">${batch.quantity_current}</strong> / ${batch.quantity_initial} remaining
+    &nbsp;·&nbsp; <span class="status-badge status-badge--${batch.status}">${batch.status}</span>
+  `;
+}
+
+function populateEditTab(batch) {
+  document.getElementById('editBatchName').value = batch.batch_name;
+  document.getElementById('editSpecies').value = batch.species;
+  document.getElementById('editBreed').value = batch.breed || '';
+  document.getElementById('editQuantityCurrent').value = batch.quantity_current;
+  document.getElementById('editQuantityCurrentLabel').textContent = `Current count (was ${batch.quantity_current} of ${batch.quantity_initial} initial)`;
+  document.getElementById('editSupplier').value = batch.supplier || '';
+  document.getElementById('editStatus').value = batch.status;
+  document.getElementById('editNotes').value = batch.notes || '';
+  document.getElementById('editBatchAlert').classList.remove('show');
+}
+
 async function openDetail(batchId) {
   activeBatchId = batchId;
   const batch = allBatches.find(b => b.id === batchId);
   if (!batch) return;
 
   document.getElementById('detailBatchName').textContent = batch.batch_name;
-  document.getElementById('detailOverview').innerHTML = `
-    ${SPECIES_ICONS[batch.species] || '🐾'} ${batch.species.replace('_', ' ')}${batch.breed ? ' · ' + batch.breed : ''}
-    &nbsp;·&nbsp; <strong style="color:var(--text)">${batch.quantity_current}</strong> / ${batch.quantity_initial} remaining
-    &nbsp;·&nbsp; <span class="status-badge status-badge--${batch.status}">${batch.status}</span>
-  `;
+  renderDetailOverview(batch);
 
   document.getElementById('mDate').value = new Date().toISOString().slice(0, 10);
   document.getElementById('mortalityAlert').classList.remove('show');
   document.getElementById('medicationAlert').classList.remove('show');
-  document.getElementById('detailBatchActions').style.display = MANAGE_ROLES.includes(currentRole) ? 'flex' : 'none';
+  resetMortalityForm();
+  resetMedicationForm();
+
+  const editTab = document.getElementById('editTab');
+  const canManage = MANAGE_ROLES.includes(currentRole);
+  editTab.style.display = canManage ? '' : 'none';
+  if (canManage) populateEditTab(batch);
 
   openModal('detailModal');
 
   const profitTab = document.getElementById('profitTab');
   const showProfit = FINANCE_VIEW_ROLES.includes(currentRole);
   profitTab.style.display = showProfit ? '' : 'none';
-  // If a non-finance role had the Profit tab open from a previous batch
-  // (shouldn't happen since the tab is hidden for them, but defensive),
-  // fall back to the Mortality tab rather than leaving an empty pane active.
-  if (!showProfit && profitTab.classList.contains('active')) {
+  // If a non-finance/non-manager role had the Profit/Edit tab open from a
+  // previous batch (shouldn't happen since both are hidden for them, but
+  // defensive), fall back to the Mortality tab rather than leaving an
+  // empty pane active.
+  if ((!showProfit && profitTab.classList.contains('active')) || (!canManage && editTab.classList.contains('active'))) {
     document.querySelector('.tab[data-tab="mortality"]').click();
   }
 
@@ -365,62 +342,146 @@ async function loadProfit(batchId) {
   }
 }
 
+let editingMortalityId = null;
+let editingMedicationId = null;
+let mortalityCache = [];
+let medicationCache = [];
+
+function resetMortalityForm() {
+  editingMortalityId = null;
+  document.getElementById('mortalityFormTitle').textContent = 'Record deaths';
+  document.getElementById('mortalitySubmitBtn').textContent = 'Record';
+  document.getElementById('mortalityCancelEditBtn').style.display = 'none';
+  document.getElementById('mQuantity').closest('.field').style.display = '';
+  document.getElementById('mDate').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('mQuantity').value = '';
+  document.getElementById('mCause').value = '';
+}
+
+function resetMedicationForm() {
+  editingMedicationId = null;
+  document.getElementById('medicationFormTitle').textContent = 'Log vaccine / medicine / treatment';
+  document.getElementById('medicationSubmitBtn').textContent = 'Log';
+  document.getElementById('medicationCancelEditBtn').style.display = 'none';
+  document.getElementById('medType').disabled = false;
+  document.getElementById('medType').value = 'vaccine';
+  document.getElementById('medName').value = '';
+  document.getElementById('medDateAdministered').value = '';
+  document.getElementById('medNextDueDate').value = '';
+  document.getElementById('medDosage').value = '';
+  document.getElementById('medAdministeredBy').value = '';
+  document.getElementById('medCost').value = '';
+  document.getElementById('medNotes').value = '';
+}
+
 async function loadMortality(batchId) {
-  const records = await api(`/farms/${farmId}/animals/batches/${batchId}/mortality`);
+  mortalityCache = await api(`/farms/${farmId}/animals/batches/${batchId}/mortality`);
   const list = document.getElementById('mortalityList');
-  list.innerHTML = records.length === 0
+  list.innerHTML = mortalityCache.length === 0
     ? '<p class="panel-empty">No deaths recorded.</p>'
-    : records.map(r => `
+    : mortalityCache.map(r => `
         <div class="record-row">
           <div>
-            <div class="record-row-main">${r.quantity} lost</div>
-            ${r.cause ? `<div class="record-row-sub">${r.cause}</div>` : ''}
+            <div class="record-row-main">${r.quantity} lost${r.cause ? ' — ' + escapeHtml(r.cause) : ''}</div>
+            <span class="record-row-date">${fmtDate(r.date)}</span>
           </div>
-          <span class="record-row-date">${fmtDate(r.date)}</span>
-          <button class="record-row-delete" title="Delete (restores the batch's stock)" data-delete-mortality="${r.id}">🗑️</button>
+          <div class="record-row-actions">
+            <button class="record-row-link record-row-link--edit" data-edit-mortality="${r.id}">Edit</button>
+            <button class="record-row-link record-row-link--delete" data-delete-mortality="${r.id}">Delete</button>
+          </div>
         </div>
       `).join('');
+  list.querySelectorAll('[data-edit-mortality]').forEach(btn => {
+    btn.addEventListener('click', () => openEditMortality(btn.dataset.editMortality));
+  });
   list.querySelectorAll('[data-delete-mortality]').forEach(btn => {
     btn.addEventListener('click', () => deleteMortality(btn.dataset.deleteMortality));
   });
 }
 
+function openEditMortality(recordId) {
+  const r = mortalityCache.find(x => x.id === recordId);
+  if (!r) return;
+  editingMortalityId = recordId;
+  document.getElementById('mortalityFormTitle').textContent = 'Edit death record';
+  document.getElementById('mortalitySubmitBtn').textContent = 'Save changes';
+  document.getElementById('mortalityCancelEditBtn').style.display = '';
+  // quantity isn't editable here — see crud.update_mortality_record's
+  // docstring (backend) — delete and re-record if the number was wrong.
+  document.getElementById('mQuantity').closest('.field').style.display = 'none';
+  document.getElementById('mDate').value = r.date;
+  document.getElementById('mCause').value = r.cause || '';
+  document.getElementById('mortalityAlert').classList.remove('show');
+}
+
+document.getElementById('mortalityCancelEditBtn').addEventListener('click', () => resetMortalityForm());
+
 async function deleteMortality(recordId) {
   if (!confirm('Delete this mortality record? The animals will be added back to the batch\'s live count.')) return;
   try {
     await api(`/farms/${farmId}/animals/batches/${activeBatchId}/mortality/${recordId}`, { method: 'DELETE' });
+    if (editingMortalityId === recordId) resetMortalityForm();
     await loadMortality(activeBatchId);
     allBatches = await api(`/farms/${farmId}/animals/batches`); // quantity_current changed
     renderBatches();
+    const refreshed = allBatches.find(b => b.id === activeBatchId);
+    if (refreshed) renderDetailOverview(refreshed);
   } catch (err) {
     showToast(err.message, true);
   }
 }
 
 async function loadMedication(batchId) {
-  const records = await api(`/farms/${farmId}/animals/batches/${batchId}/medication`);
+  medicationCache = await api(`/farms/${farmId}/animals/batches/${batchId}/medication`);
   const list = document.getElementById('medicationList');
-  list.innerHTML = records.length === 0
+  list.innerHTML = medicationCache.length === 0
     ? '<p class="panel-empty">No medication history.</p>'
-    : records.map(r => `
+    : medicationCache.map(r => `
         <div class="record-row">
           <div>
-            <div class="record-row-main">${r.name}${r.cost != null ? ' · ' + money(r.cost) : ''}</div>
+            <div class="record-row-main">${escapeHtml(r.name)}${r.cost != null ? ' · ' + money(r.cost) : ''}</div>
             <div class="record-row-sub">${r.type}${r.next_due_date ? ' · next due ' + fmtDate(r.next_due_date) : ''}</div>
+            <span class="record-row-date">${fmtDate(r.date_administered)}</span>
           </div>
-          <span class="record-row-date">${fmtDate(r.date_administered)}</span>
-          <button class="record-row-delete" title="Delete" data-delete-medication="${r.id}">🗑️</button>
+          <div class="record-row-actions">
+            <button class="record-row-link record-row-link--edit" data-edit-medication="${r.id}">Edit</button>
+            <button class="record-row-link record-row-link--delete" data-delete-medication="${r.id}">Delete</button>
+          </div>
         </div>
       `).join('');
+  list.querySelectorAll('[data-edit-medication]').forEach(btn => {
+    btn.addEventListener('click', () => openEditMedication(btn.dataset.editMedication));
+  });
   list.querySelectorAll('[data-delete-medication]').forEach(btn => {
     btn.addEventListener('click', () => deleteMedication(btn.dataset.deleteMedication));
   });
 }
 
+function openEditMedication(recordId) {
+  const r = medicationCache.find(x => x.id === recordId);
+  if (!r) return;
+  editingMedicationId = recordId;
+  document.getElementById('medicationFormTitle').textContent = 'Edit medication record';
+  document.getElementById('medicationSubmitBtn').textContent = 'Save changes';
+  document.getElementById('medicationCancelEditBtn').style.display = '';
+  document.getElementById('medType').value = r.type;
+  document.getElementById('medName').value = r.name;
+  document.getElementById('medDateAdministered').value = r.date_administered || '';
+  document.getElementById('medNextDueDate').value = r.next_due_date || '';
+  document.getElementById('medDosage').value = r.dosage || '';
+  document.getElementById('medAdministeredBy').value = r.administered_by || '';
+  document.getElementById('medCost').value = r.cost ?? '';
+  document.getElementById('medNotes').value = r.notes || '';
+  document.getElementById('medicationAlert').classList.remove('show');
+}
+
+document.getElementById('medicationCancelEditBtn').addEventListener('click', () => resetMedicationForm());
+
 async function deleteMedication(recordId) {
   if (!confirm('Delete this medication record?')) return;
   try {
     await api(`/farms/${farmId}/animals/batches/${activeBatchId}/medication/${recordId}`, { method: 'DELETE' });
+    if (editingMedicationId === recordId) resetMedicationForm();
     await loadMedication(activeBatchId);
   } catch (err) {
     showToast(err.message, true);
@@ -432,6 +493,18 @@ document.getElementById('mortalityForm').addEventListener('submit', async (e) =>
   const alertBox = document.getElementById('mortalityAlert');
   alertBox.classList.remove('show');
   try {
+    if (editingMortalityId) {
+      await api(`/farms/${farmId}/animals/batches/${activeBatchId}/mortality/${editingMortalityId}`, {
+        method: 'PATCH',
+        body: {
+          date: document.getElementById('mDate').value,
+          cause: document.getElementById('mCause').value.trim() || null,
+        },
+      });
+      resetMortalityForm();
+      await loadMortality(activeBatchId);
+      return;
+    }
     await api(`/farms/${farmId}/animals/batches/${activeBatchId}/mortality`, {
       method: 'POST',
       body: {
@@ -440,15 +513,11 @@ document.getElementById('mortalityForm').addEventListener('submit', async (e) =>
         cause: document.getElementById('mCause').value.trim() || null,
       },
     });
-    document.getElementById('mQuantity').value = '';
-    document.getElementById('mCause').value = '';
+    resetMortalityForm();
     await loadMortality(activeBatchId);
     await loadBatches(); // quantity_current changed — refresh cards behind the modal
     const refreshed = allBatches.find(b => b.id === activeBatchId);
-    if (refreshed) {
-      document.getElementById('detailOverview').innerHTML = document.getElementById('detailOverview').innerHTML
-        .replace(/<strong style="color:var\(--text\)">\d+<\/strong>/, `<strong style="color:var(--text)">${refreshed.quantity_current}</strong>`);
-    }
+    if (refreshed) renderDetailOverview(refreshed);
   } catch (err) {
     alertBox.textContent = err.message;
     alertBox.classList.add('show');
@@ -459,21 +528,23 @@ document.getElementById('medicationForm').addEventListener('submit', async (e) =
   e.preventDefault();
   const alertBox = document.getElementById('medicationAlert');
   alertBox.classList.remove('show');
+  const body = {
+    type: document.getElementById('medType').value,
+    name: document.getElementById('medName').value.trim(),
+    date_administered: document.getElementById('medDateAdministered').value || null,
+    next_due_date: document.getElementById('medNextDueDate').value || null,
+    dosage: document.getElementById('medDosage').value.trim() || null,
+    administered_by: document.getElementById('medAdministeredBy').value.trim() || null,
+    cost: document.getElementById('medCost').value ? Number(document.getElementById('medCost').value) : null,
+    notes: document.getElementById('medNotes').value.trim() || null,
+  };
   try {
-    await api(`/farms/${farmId}/animals/batches/${activeBatchId}/medication`, {
-      method: 'POST',
-      body: {
-        type: document.getElementById('medType').value,
-        name: document.getElementById('medName').value.trim(),
-        date_administered: document.getElementById('medDateAdministered').value || null,
-        next_due_date: document.getElementById('medNextDueDate').value || null,
-        cost: document.getElementById('medCost').value ? Number(document.getElementById('medCost').value) : null,
-      },
-    });
-    document.getElementById('medName').value = '';
-    document.getElementById('medDateAdministered').value = '';
-    document.getElementById('medNextDueDate').value = '';
-    document.getElementById('medCost').value = '';
+    if (editingMedicationId) {
+      await api(`/farms/${farmId}/animals/batches/${activeBatchId}/medication/${editingMedicationId}`, { method: 'PATCH', body });
+    } else {
+      await api(`/farms/${farmId}/animals/batches/${activeBatchId}/medication`, { method: 'POST', body });
+    }
+    resetMedicationForm();
     await loadMedication(activeBatchId);
   } catch (err) {
     alertBox.textContent = err.message;

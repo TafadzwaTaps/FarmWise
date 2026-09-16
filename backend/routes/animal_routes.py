@@ -43,19 +43,29 @@ class AnimalBatchCreate(BaseModel):
     notes: str | None = None
 
 
+BatchStatus = Literal["active", "closed"]
+
+
 class AnimalBatchUpdate(BaseModel):
-    """species and quantity_initial/quantity_current are deliberately
-    absent — see crud.update_batch's docstring for why. Everything else
-    about a batch (name, breed, cost, supplier, dates, notes) is fixable
-    after the fact, same as any other record in this app."""
+    """Matches the mobile app's single-form batch edit exactly (species,
+    status, and current count included) rather than the previous web-only
+    design that excluded them — see update_batch below for how a
+    quantity_current change is still routed through the atomic,
+    race-safe adjustment path rather than a raw overwrite, even though
+    it's now reachable from this one form instead of a separate
+    "Adjust stock" flow."""
     batch_name: str | None = Field(default=None, min_length=1, max_length=150)
+    species: Species | None = None
     breed: str | None = None
+    quantity_current: int | None = Field(default=None, ge=0)
     purchase_date: date | None = None
     purchase_price_total: float | None = None
     supplier: str | None = None
+    status: BatchStatus | None = None
     average_weight_kg: float | None = None
     expected_selling_date: date | None = None
     notes: str | None = None
+    adjustment_reason: str | None = None  # optional context if quantity_current changed — not required, matching mobile's simpler form
 
 
 class BatchStockAdjustment(BaseModel):
@@ -140,16 +150,56 @@ def get_batch(farm_id: str, batch_id: str, _member: dict = Depends(require_farm_
 
 
 @router.patch("/batches/{batch_id}")
-def update_batch(farm_id: str, batch_id: str, data: AnimalBatchUpdate, _member: dict = Depends(require_farm_role(*_MANAGE_ROLES))):
-    _get_batch_or_404(farm_id, batch_id)
-    fields = {k: v for k, v in data.model_dump().items() if v is not None}
-    if not fields:
+def update_batch(farm_id: str, batch_id: str, data: AnimalBatchUpdate, _member: dict = Depends(require_farm_role(*_MANAGE_ROLES)), user: dict = Depends(get_current_user)):
+    """A single form/save action can now change the batch's live headcount
+    (quantity_current) alongside its other fields — matching the mobile
+    app's one-form edit exactly. quantity_current is NOT written directly
+    though: it's routed through the same atomic, race-safe
+    crud.decrement_batch_quantity used everywhere else a batch's count
+    changes (sales, mortality, the standalone /adjust endpoint), computed
+    as a signed delta from the batch's current value. This preserves
+    every correctness guarantee that function provides (no lost updates
+    under concurrent writes, auto reopen/close on the status transition)
+    while still letting the count be edited from this one form the way
+    mobile's UI does, instead of a separate screen/modal.
+    """
+    batch = _get_batch_or_404(farm_id, batch_id)
+    fields = {k: v for k, v in data.model_dump().items() if v is not None and k not in ("quantity_current", "adjustment_reason")}
+    quantity_current = data.quantity_current
+
+    if not fields and quantity_current is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing to update")
+
     if "purchase_date" in fields:
         fields["purchase_date"] = fields["purchase_date"].isoformat()
     if "expected_selling_date" in fields:
         fields["expected_selling_date"] = fields["expected_selling_date"].isoformat()
-    return crud.update_batch(farm_id, batch_id, fields)
+
+    if quantity_current is not None and quantity_current != batch["quantity_current"]:
+        delta = quantity_current - batch["quantity_current"]
+        try:
+            batch = crud.decrement_batch_quantity(batch, -delta)
+        except ValueError:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "This batch's stock just changed (another operation happening at the same time). "
+                "Please refresh and try again.",
+            )
+        audit(
+            "batch_stock_adjusted", farm_id=farm_id, batch_id=batch_id, delta=delta,
+            reason=data.adjustment_reason or "Manual correction via batch edit", by_user=user["user_id"],
+        )
+        # An explicit status choice in this same save should still win over
+        # decrement_batch_quantity's own auto-close-at-zero/auto-reopen
+        # logic — a manager closing a batch on purpose (or deliberately
+        # keeping it open despite a zero count, however unusual) shouldn't
+        # be silently overridden by the side effect of a stock edit made
+        # in the same action.
+
+    if fields:
+        batch = crud.update_batch(farm_id, batch_id, fields)
+
+    return batch
 
 
 @router.delete("/batches/{batch_id}", status_code=status.HTTP_204_NO_CONTENT)

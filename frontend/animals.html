@@ -143,16 +143,12 @@
       <button class="modal-close" data-close="detailModal">✕</button>
     </div>
 
-    <div id="detailOverview" style="margin-bottom:8px;font-size:13px;color:var(--text-dim)"></div>
-    <div id="detailBatchActions" style="margin-bottom:18px;display:none">
-      <button type="button" class="btn btn--outline btn--sm" id="editBatchBtn">Edit batch info</button>
-      <button type="button" class="btn btn--outline btn--sm" id="adjustStockBtn">Adjust stock</button>
-      <button type="button" class="btn btn--danger btn--sm" id="deleteBatchBtn">Delete batch</button>
-    </div>
+    <div id="detailOverview" style="margin-bottom:18px;font-size:13px;color:var(--text-dim)"></div>
 
     <div class="tabs">
       <div class="tab active" data-tab="mortality">Mortality</div>
       <div class="tab" data-tab="medication">Medication</div>
+      <div class="tab" data-tab="edit" id="editTab" style="display:none">Edit</div>
       <div class="tab" data-tab="profit" id="profitTab" style="display:none">Profit</div>
     </div>
 
@@ -160,13 +156,16 @@
       <div class="record-list" id="mortalityList"></div>
       <div class="alert alert--error" id="mortalityAlert"></div>
       <form id="mortalityForm">
-        <div class="section-title">Record deaths</div>
+        <div class="section-title" id="mortalityFormTitle">Record deaths</div>
         <div class="field-row">
           <div class="field"><label for="mDate">Date</label><input id="mDate" type="date" required></div>
           <div class="field"><label for="mQuantity">Quantity</label><input id="mQuantity" type="number" min="1" required></div>
         </div>
         <div class="field"><label for="mCause">Cause <span style="font-weight:400">(optional)</span></label><input id="mCause"></div>
-        <div class="form-actions"><button type="submit" class="btn btn--primary btn--sm">Record</button></div>
+        <div class="form-actions">
+          <button type="button" class="btn btn--outline btn--sm" id="mortalityCancelEditBtn" style="display:none">Cancel</button>
+          <button type="submit" class="btn btn--primary btn--sm" id="mortalitySubmitBtn">Record</button>
+        </div>
       </form>
     </div>
 
@@ -174,7 +173,7 @@
       <div class="record-list" id="medicationList"></div>
       <div class="alert alert--error" id="medicationAlert"></div>
       <form id="medicationForm">
-        <div class="section-title">Log vaccine / medicine / treatment</div>
+        <div class="section-title" id="medicationFormTitle">Log vaccine / medicine / treatment</div>
         <div class="field-row">
           <div class="field"><label for="medType">Type</label>
             <select id="medType" required>
@@ -190,44 +189,63 @@
           <div class="field"><label for="medDateAdministered">Date administered <span style="font-weight:400">(optional)</span></label><input id="medDateAdministered" type="date"></div>
           <div class="field"><label for="medNextDueDate">Next due <span style="font-weight:400">(optional)</span></label><input id="medNextDueDate" type="date"></div>
         </div>
+        <div class="field-row">
+          <div class="field"><label for="medDosage">Dosage <span style="font-weight:400">(optional)</span></label><input id="medDosage" placeholder="e.g. 2ml, 1 tablet"></div>
+          <div class="field"><label for="medAdministeredBy">Administered by <span style="font-weight:400">(optional)</span></label><input id="medAdministeredBy" placeholder="e.g. vet name"></div>
+        </div>
         <div class="field"><label for="medCost">Cost <span style="font-weight:400">(optional — improves the batch's Profit tab accuracy)</span></label><input id="medCost" type="number" step="0.01" min="0"></div>
-        <div class="form-actions"><button type="submit" class="btn btn--primary btn--sm">Log</button></div>
+        <div class="field"><label for="medNotes">Notes <span style="font-weight:400">(optional)</span></label><textarea id="medNotes" rows="2"></textarea></div>
+        <div class="form-actions">
+          <button type="button" class="btn btn--outline btn--sm" id="medicationCancelEditBtn" style="display:none">Cancel</button>
+          <button type="submit" class="btn btn--primary btn--sm" id="medicationSubmitBtn">Log</button>
+        </div>
       </form>
+    </div>
+
+    <div class="tab-panel" id="tabEdit">
+      <div class="alert alert--error" id="editBatchAlert"></div>
+      <form id="editBatchForm">
+        <div class="field"><label for="editBatchName">Batch name</label><input id="editBatchName" required></div>
+        <div class="field"><label for="editSpecies">Species</label>
+          <select id="editSpecies" required>
+            <option value="chicken_broiler">Chicken (Broiler)</option>
+            <option value="chicken_layer">Chicken (Layer)</option>
+            <option value="cattle">Cattle</option>
+            <option value="goat">Goat</option>
+            <option value="sheep">Sheep</option>
+            <option value="pig">Pig</option>
+            <option value="rabbit">Rabbit</option>
+            <option value="fish">Fish</option>
+            <option value="turkey">Turkey</option>
+            <option value="duck">Duck</option>
+            <option value="bee">Bee</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="field"><label for="editBreed">Breed <span style="font-weight:400">(optional)</span></label><input id="editBreed"></div>
+        <div class="field"><label for="editQuantityCurrent" id="editQuantityCurrentLabel">Current count</label><input id="editQuantityCurrent" type="number" min="0" required></div>
+        <div class="field"><label for="editSupplier">Supplier <span style="font-weight:400">(optional)</span></label><input id="editSupplier"></div>
+        <div class="field"><label for="editStatus">Status</label>
+          <select id="editStatus" required>
+            <option value="active">Active</option>
+            <option value="closed">Closed</option>
+          </select>
+        </div>
+        <div class="field"><label for="editNotes">Notes <span style="font-weight:400">(optional)</span></label><textarea id="editNotes" rows="2"></textarea></div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn--primary" id="editBatchSubmitBtn">Save changes</button>
+        </div>
+      </form>
+      <div class="divider" style="height:1px;background:var(--border);margin:20px 0"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:12px;color:var(--text-dim)">Deleting keeps this batch's sales, mortality, and medication history — it just won't show up in your lists anymore.</div>
+        <button type="button" class="btn btn--danger btn--sm" id="deleteBatchBtn" style="flex-shrink:0;margin-left:12px">Delete batch</button>
+      </div>
     </div>
 
     <div class="tab-panel" id="tabProfit">
       <div id="profitContent"><p class="panel-empty">Loading…</p></div>
     </div>
-  </div>
-</div>
-
-<!-- ═══════ Adjust batch stock modal ═══════ -->
-<div class="modal-overlay" id="adjustBatchModal">
-  <div class="modal" style="max-width:440px">
-    <div class="modal-header">
-      <h2>Adjust stock</h2>
-      <button class="modal-close" data-close="adjustBatchModal">✕</button>
-    </div>
-    <p style="font-size:12px;color:var(--text-dim);margin-bottom:14px">
-      For corrections that aren't a sale or a recorded death — a physical recount, a miscount at
-      creation, an animal that wandered back. Sales and mortality already keep this number accurate
-      on their own.
-    </p>
-    <div class="alert alert--error" id="adjustBatchAlert"></div>
-    <form id="adjustBatchForm">
-      <div class="field">
-        <label for="adjustBatchDelta">Change</label>
-        <input id="adjustBatchDelta" type="number" step="1" required placeholder="e.g. 5 to add, -3 to remove">
-      </div>
-      <div class="field">
-        <label for="adjustBatchReason">Reason</label>
-        <textarea id="adjustBatchReason" rows="2" required placeholder="e.g. Physical recount on 12 Jan found 5 more birds than recorded"></textarea>
-      </div>
-      <div class="form-actions">
-        <button type="button" class="btn btn--outline" data-close="adjustBatchModal">Cancel</button>
-        <button type="submit" class="btn btn--primary" id="adjustBatchSubmitBtn">Apply</button>
-      </div>
-    </form>
   </div>
 </div>
 

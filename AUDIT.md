@@ -1968,3 +1968,164 @@ confirms the app starts cleanly with the new routes registered.
   visual redesign, which risks the "don't touch working UI design" part
   of the request if done without very specific direction on what to
   change.
+
+---
+
+# Post-Phase-9, continued — Matching the mobile app's batch CRUD UI exactly
+
+The user shared 10 screenshots of the mobile app's actual UI and asked
+for the web version to match it. Real, concrete differences were found
+by comparing screenshot-by-screenshot against the web code, not assumed.
+
+### The core mismatch: mobile edits a batch through a single "Edit" tab; web had three separate controls
+**Status:** FIXED
+
+Mobile's batch detail view has three tabs — **Mortality | Medication |
+Edit** — where "Edit" is a single form covering batch name, species,
+breed, current count (labeled "Current count (was X of Y initial)"),
+supplier, status, and notes, with one "Save changes" button. Web
+instead had a separate row of "Edit batch info" / "Adjust stock" /
+"Delete batch" buttons sitting outside the tabs, opening a reused
+create-batch modal for edits and a second modal for stock adjustment —
+three different affordances doing what mobile does in one screen.
+
+**Fix — consolidated to match:**
+- Batch detail modal tabs are now **Mortality | Medication | Edit**
+  (plus **Profit**, a genuine web-only addition from Phase 4/5 that
+  mobile's screenshots don't show — kept as an extra tab, not a
+  deviation, since it's real functionality mobile doesn't have rather
+  than something web was doing differently).
+- The Edit tab is one form: batch name, species, breed, current count
+  (with the exact "(was X of Y initial)" phrasing), supplier, status,
+  notes, "Save changes." A "Delete batch" control sits at the bottom of
+  the same tab (mobile's screenshots don't show a delete option at all,
+  but removing a already-working, safe, soft-delete feature to match
+  that absence would be a regression, not parity — kept it, just
+  relocated to fit the new single-tab layout naturally).
+- The standalone "Adjust stock" modal (built in the previous round) is
+  gone as a separate UI element — its capability now lives in the Edit
+  tab's "Current count" field instead, so there's exactly one way to
+  do this, matching mobile.
+
+**Backend change required to support this:** `AnimalBatchUpdate`
+previously excluded `species` and `quantity_current` from `PATCH`
+(a deliberate web-only design choice from the previous round, not a
+data-integrity requirement — species doesn't cascade into any other
+table's constraints). Both are now accepted. Critically, a
+`quantity_current` change is **not** written as a raw overwrite: the
+route computes the signed delta from the batch's current value and
+routes it through the same atomic, race-safe
+`crud.decrement_batch_quantity` used everywhere else a batch's count
+changes (sales, mortality, the previous round's `/adjust` endpoint) —
+so the correctness guarantees built up over the last several rounds
+(no lost updates under concurrent writes, auto reopen/close on the
+zero-quantity transition) are preserved even though the count is now
+reachable from this one consolidated form. An explicit `status` choice
+in the same save correctly overrides `decrement_batch_quantity`'s own
+auto-close-at-zero logic, rather than being silently clobbered by it —
+verified with a dedicated test for that exact ordering.
+
+`quantity_initial` remains excluded — that's the fixed denominator
+`batch_profit_summary`'s whole weighted-average costing model (Phase 4)
+divides by; changing it retroactively would corrupt that model, and
+nothing in the mobile screenshots suggests it should be editable either.
+
+The standalone `POST .../adjust` endpoint from the previous round is
+left in place, tested, and functional — just no longer exposed via its
+own web UI element, since the Edit tab now covers the same need in the
+way mobile does it.
+
+**Verification:** 4 new/updated backend tests — species is now actually
+applied (not silently dropped); a quantity change is confirmed routed
+through `decrement_batch_quantity` with the correctly-signed delta, not
+a direct write; leaving the count unchanged in a save that only touches
+other fields correctly skips the adjustment path entirely (no spurious
+audit-log entry or race-condition exposure for edits that never touched
+stock); and the explicit-status-wins-over-auto-close ordering. **138
+tests passing** overall.
+
+### A second real gap: mobile lets you edit a mortality record, not just delete it
+**Status:** FIXED
+
+Screenshot 8 clearly shows an existing mortality record ("4 lost — Cold
+weather") with inline **Edit** (green) and **Delete** (red) text links.
+Web only had a delete icon — editing wasn't exposed at all, even though
+the backend has supported it (`PATCH .../mortality/{record_id}`) since
+the CRUD-completion round two sessions ago.
+
+**Fix:** the mortality (and, for consistency, medication) record list
+now renders "Edit"/"Delete" as colored text links matching mobile's
+exact visual style, not icon buttons. Clicking Edit switches the
+existing create-form into an edit-in-place mode: pre-filled, the
+quantity field hidden (still not editable, for the same reason as
+before — see `crud.update_mortality_record`'s docstring — delete and
+re-record if the number itself was wrong), a Cancel button to back out,
+and the submit button becomes `PATCH` instead of `POST`. Medication
+records get the identical treatment.
+
+**A related, smaller gap fixed in the same pass:** the mobile
+screenshots (6, 7, 10) show the medication form has **Dosage** and
+**Administered by** fields — web's form was missing both entirely (only
+had Type, Name, Date administered, Next due date, Cost, Notes... and on
+closer inspection, was missing Notes as a visible field too). Both
+fields already existed on the backend (`medication_records.dosage`,
+`administered_by`) and were simply never exposed in the web form. Added
+both, plus the Notes field, bringing the form to full parity with
+mobile's fields (excluding evidence photo/video attachments — see
+"explicitly not done" below).
+
+**Verification:** ran the actual page through a scripted interaction in
+the jsdom harness — opened a batch's detail view, confirmed the Edit
+tab's fields pre-fill correctly including the exact "(was 19 of 23
+initial)" wording, clicked a mortality record's Edit link, and
+confirmed the form correctly switches into edit mode with the quantity
+field hidden and cause pre-filled. Zero runtime errors.
+
+### Smaller parity fix: team-invite role descriptions
+**Status:** FIXED
+
+Mobile's "Add to team" role dropdown uses descriptive labels like
+"Worker — field reports only" instead of a bare role name. Web's
+dropdown just said "Worker". Rather than copying mobile's text
+verbatim — which is actually inaccurate for this app's real permission
+model (a worker here can log sales, expenses, feed, mortality, and
+medication too, not just field reports, per every role check built
+across this whole engagement) — wrote accurate descriptors in the same
+style: "Worker — logs day-to-day records", "Farm manager — full
+operations, no team changes", "Accountant — views finances only",
+"Farmer — full access".
+
+### Explicitly not done this pass, and why
+- **Evidence photo/video attachments on mortality and medication
+  records** — mobile's screenshots show Photo/Video/Library buttons on
+  both forms. The database schema has no `media` column on
+  `mortality_records` or `medication_records` at all (only
+  `field_reports` supports media) — this would need a new migration and
+  storage-upload wiring, not just frontend work. Flagged as a real gap,
+  not built this pass given the scope already covered.
+- **Dashboard "Quick actions" shortcut buttons** (Log sale, Log expense,
+  New batch, Mortality) shown on mobile's dashboard — web's dashboard
+  doesn't have equivalent shortcuts. Noted, not built this pass; the
+  same actions are all one click away via each page's own "+" button
+  already.
+- **Three-way Dark/Light/System appearance setting** — mobile offers
+  "System" (follow OS preference); web's toggle is binary (dark/light
+  only). Noted, not built this pass.
+- **Per-member role dropdown in the existing team list** (as opposed to
+  the invite form) intentionally kept as plain role names, not the
+  longer descriptive labels — that control sits inline in a compact
+  per-row layout where the longer text would crowd the row; the invite
+  form has the room for it.
+
+### Verification summary
+`pytest tests/` — 138 passed. `pyflakes` — zero findings outside
+intentional barrel re-exports. `node --check` — all frontend files
+clean. HTML `<div>` balance re-checked across every page. The jsdom
+runtime harness re-run against all 10 pages, plus a dedicated scripted
+interaction test specifically exercising the new consolidated Edit tab
+and the mortality record edit-in-place flow — zero runtime errors.
+Live boot test confirms the app starts cleanly with all 108 routes
+registered (route count unchanged from the previous round — this pass
+restructured existing endpoints' behavior and added no new routes,
+only changed what one existing route, `PATCH .../batches/{batch_id}`,
+accepts).
