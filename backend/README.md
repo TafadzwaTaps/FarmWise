@@ -213,6 +213,7 @@ GET  /api/v1/farms/{farm_id}/members
 POST/PATCH/DELETE /api/v1/farms/{farm_id}/members[/{member_id}]   (team management, added post-Phase-9 — AUDIT.md; farmer role only, owner protected)
 
 POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/animals/batches[/{batch_id}]   (DELETE soft-deletes — AUDIT.md FWA-033)
+POST /api/v1/farms/{farm_id}/animals/batches/{batch_id}/adjust   (manual stock correction, requires a reason)
 POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/animals/batches/{batch_id}/mortality[/{record_id}]   (quantity not editable — delete restores stock)
 POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/animals/batches/{batch_id}/medication[/{record_id}]
 GET      /api/v1/farms/{farm_id}/animals/batches/{batch_id}/profit    (added — AUDIT.md FWA-006)
@@ -228,6 +229,10 @@ GET      /api/v1/farms/{farm_id}/finance-summary
 
 POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/inventory[/{item_id}]
 POST /api/v1/farms/{farm_id}/inventory/{item_id}/adjust
+
+POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/workers[/{worker_id}]
+POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/workers/{worker_id}/attendance[/{record_id}]
+POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/workers/{worker_id}/payments[/{payment_id}]
 
 POST/GET       /api/v1/farms/{farm_id}/field-reports
 GET/PATCH/DELETE /api/v1/farms/{farm_id}/field-reports/{report_id}   (PATCH/DELETE added post-Phase-9 — AUDIT.md FWA-031; author-only, pending-only)

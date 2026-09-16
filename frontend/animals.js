@@ -195,6 +195,45 @@ document.getElementById('editBatchBtn').addEventListener('click', () => {
   if (batch) openEditBatchModal(batch);
 });
 
+document.getElementById('adjustStockBtn').addEventListener('click', () => {
+  document.getElementById('adjustBatchForm').reset();
+  document.getElementById('adjustBatchAlert').classList.remove('show');
+  openModal('adjustBatchModal');
+});
+
+document.getElementById('adjustBatchForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const alertBox = document.getElementById('adjustBatchAlert');
+  alertBox.classList.remove('show');
+  const btn = document.getElementById('adjustBatchSubmitBtn');
+  const delta = Number(document.getElementById('adjustBatchDelta').value);
+  const reason = document.getElementById('adjustBatchReason').value.trim();
+  if (!delta) { alertBox.textContent = 'Enter a non-zero change.'; alertBox.classList.add('show'); return; }
+  btn.disabled = true; btn.textContent = 'Applying...';
+  try {
+    await api(`/farms/${farmId}/animals/batches/${activeBatchId}/adjust`, {
+      method: 'POST',
+      body: { delta, reason },
+    });
+    closeModal('adjustBatchModal');
+    allBatches = await api(`/farms/${farmId}/animals/batches`);
+    renderBatches();
+    const batch = allBatches.find(b => b.id === activeBatchId);
+    if (batch) {
+      document.getElementById('detailOverview').innerHTML = `
+        ${SPECIES_ICONS[batch.species] || '🐾'} ${batch.species.replace('_', ' ')}${batch.breed ? ' · ' + batch.breed : ''}
+        &nbsp;·&nbsp; <strong style="color:var(--text)">${batch.quantity_current}</strong> / ${batch.quantity_initial} remaining
+        &nbsp;·&nbsp; <span class="status-badge status-badge--${batch.status}">${batch.status}</span>
+      `;
+    }
+  } catch (err) {
+    alertBox.textContent = err.message;
+    alertBox.classList.add('show');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Apply';
+  }
+});
+
 document.getElementById('deleteBatchBtn').addEventListener('click', async () => {
   if (!confirm('Delete this batch? Its sales, mortality, and medication history is kept for your records, but the batch itself will no longer appear in your lists.')) return;
   try {
@@ -202,7 +241,7 @@ document.getElementById('deleteBatchBtn').addEventListener('click', async () => 
     closeModal('detailModal');
     await loadBatches();
   } catch (err) {
-    alert(err.message);
+    showToast(err.message, true);
   }
 });
 
@@ -354,7 +393,7 @@ async function deleteMortality(recordId) {
     allBatches = await api(`/farms/${farmId}/animals/batches`); // quantity_current changed
     renderBatches();
   } catch (err) {
-    alert(err.message);
+    showToast(err.message, true);
   }
 }
 
@@ -384,7 +423,7 @@ async function deleteMedication(recordId) {
     await api(`/farms/${farmId}/animals/batches/${activeBatchId}/medication/${recordId}`, { method: 'DELETE' });
     await loadMedication(activeBatchId);
   } catch (err) {
-    alert(err.message);
+    showToast(err.message, true);
   }
 }
 
@@ -486,6 +525,26 @@ function showLoadError(status) {
     <button class="btn btn--primary" onclick="location.reload()">Try again</button>
   `;
   main.appendChild(box);
+}
+
+// AUDIT.md — a background action failing (e.g. deleting a record) used to
+// show a plain browser alert(), which blocks the whole page until
+// dismissed and looks jarring next to the rest of the UI. A small
+// auto-dismissing toast is less disruptive for something the user can
+// just try again.
+function showToast(message, isError) {
+  let stack = document.getElementById('toastStack');
+  if (!stack) {
+    stack = document.createElement('div');
+    stack.id = 'toastStack';
+    stack.className = 'toast-stack';
+    document.body.appendChild(stack);
+  }
+  const toast = document.createElement('div');
+  toast.className = 'toast' + (isError ? ' toast--error' : '');
+  toast.textContent = message;
+  stack.appendChild(toast);
+  setTimeout(() => toast.remove(), 3500);
 }
 
 async function init() {

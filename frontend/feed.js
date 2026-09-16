@@ -186,7 +186,7 @@ async function deletePurchase(purchaseId) {
     await api(`/farms/${farmId}/feed/purchases/${purchaseId}`, { method: 'DELETE' });
     await loadPurchases(); await loadSummary();
   } catch (err) {
-    alert(err.message);
+    showToast(err.message, true);
   }
 }
 
@@ -240,7 +240,7 @@ async function deleteConsumption(recordId) {
     await api(`/farms/${farmId}/feed/consumption/${recordId}`, { method: 'DELETE' });
     await loadConsumption(); await loadSummary();
   } catch (err) {
-    alert(err.message);
+    showToast(err.message, true);
   }
 }
 
@@ -360,6 +360,26 @@ function showLoadError(status) {
     <button class="btn btn--primary" onclick="location.reload()">Try again</button>
   `;
   main.appendChild(box);
+}
+
+// AUDIT.md — a background action failing (e.g. deleting a record) used to
+// show a plain browser alert(), which blocks the whole page until
+// dismissed and looks jarring next to the rest of the UI. A small
+// auto-dismissing toast is less disruptive for something the user can
+// just try again.
+function showToast(message, isError) {
+  let stack = document.getElementById('toastStack');
+  if (!stack) {
+    stack = document.createElement('div');
+    stack.id = 'toastStack';
+    stack.className = 'toast-stack';
+    document.body.appendChild(stack);
+  }
+  const toast = document.createElement('div');
+  toast.className = 'toast' + (isError ? ' toast--error' : '');
+  toast.textContent = message;
+  stack.appendChild(toast);
+  setTimeout(() => toast.remove(), 3500);
 }
 
 async function init() {

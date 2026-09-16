@@ -1855,3 +1855,116 @@ and `species` locks) rather than only checking that the page loads.
   already existed; the one exception (`decrement_batch_quantity`'s
   internals) was a correctness fix to existing code that kept its exact
   external signature and contract, not a design change.
+
+---
+
+# Post-Phase-9, continued — Manual stock adjustment, worker record CRUD, UI polish
+
+Follow-up to the previous round's CRUD pass. Three concrete asks:
+owner-editable stock, closing any remaining CRUD gaps, and a UI polish
+pass.
+
+### New — manual batch stock adjustment
+**Status:** FIXED
+
+Inventory items already had a working "Adjust stock" feature
+(confirmed before building anything, not assumed). Animal batches
+didn't — the previous round deliberately locked `quantity_current` from
+direct editing (only sales/mortality/delete-restore could change it) to
+protect data integrity, but that left no path for a manual correction:
+a miscount at creation, a physical recount, an animal that wandered
+back and was never logged as a sale or a death.
+
+**Fix:** `POST /farms/{farm_id}/animals/batches/{batch_id}/adjust` — a
+signed delta (positive adds, negative removes) plus a **required**
+reason. Reuses the exact same atomic, race-safe adjustment
+(`crud.decrement_batch_quantity`) already proven correct for
+sale/mortality stock restoration — a positive delta here is a negative
+amount to that function, the same inversion already used by
+`delete_sale`. Manager-role only, logged via the existing `audit()`
+helper (`batch_stock_adjusted`, with the delta and reason) for the same
+reason sensitive actions have been logged throughout this engagement:
+an unexplained quantity change in a farm's history is exactly the kind
+of thing worth being able to trace later.
+
+**Frontend:** new "Adjust stock" button in the batch detail view,
+alongside Edit and Delete. The reason field is required in both the
+Pydantic model and the HTML form — a zero delta or an empty reason is
+rejected before the request is even sent.
+
+**Verification:** 6 new tests — adjustment up and down call the
+underlying function with the correctly-signed and correctly-negated
+amount; a zero delta and an empty reason are both rejected (`422`);
+insufficient stock surfaces as a clean `409`, not a raw error; a worker
+role is rejected (`403`).
+
+### New — worker attendance and payment records had the same Create+List-only gap
+**Status:** FIXED
+
+Checked systematically for the same pattern found repeatedly last
+round, in the one domain not yet re-checked: `routes/worker_routes.py`
+had full CRUD for the worker profile itself (`PATCH`/`DELETE` already
+existed), but `worker_attendance` and `worker_payments` only had `POST`
+and `GET` — identical shape to the sales/expenses/batches gap from the
+previous round, just not yet found in this domain.
+
+**Fix:** `PATCH`/`DELETE` for both. Attendance's `update` reuses the
+same `UNIQUE(worker_id, date)` conflict handling `record_attendance`
+already has (catching the Postgres `23505` and surfacing a clean `409`
+rather than a raw error) — editing a record's date into a collision
+with an existing one is caught the same way a duplicate create is.
+Payments stay manager-role only for both edit and delete, matching
+their existing create restriction (attendance stays open to any
+`_RECORD_ROLES` member, also matching its create restriction) — workers
+logging their own attendance shouldn't be able to edit payroll.
+
+**A second instance of the `date`-field self-shadowing bug (see the
+previous round's writeup) found and fixed pre-emptively**: `AttendanceUpdate`
+needed an optional `date` field with a default, the exact shape that
+crashes at class-definition time. Applied the same type-alias fix
+(`from datetime import date as _date`) before it could ever surface as
+a runtime error, rather than discovering it the same way as last time.
+
+**Frontend:** delete buttons on both the attendance and payment record
+lists in the worker detail view — matching the same "delete and re-log"
+pattern already established for mortality/medication records rather
+than building two more full edit forms for what are simple day-stamped
+entries.
+
+**Verification:** 6 new tests covering update/delete for both, the
+duplicate-date conflict handling, and the worker-role restriction on
+payment edits.
+
+### UI polish — replaced blocking alert() popups with toast notifications
+**Status:** FIXED
+
+All 11 remaining `alert(err.message)` calls — used for delete-error
+feedback across the CRUD UI added in the last two rounds
+(`finance.js`, `feed.js`, `animals.js`, `workers.js`) — replaced with a
+small, auto-dismissing toast notification styled to match each page's
+existing theme, instead of a blocking native browser dialog. Added
+consistently across all four files with the same helper function and
+matching CSS (`.toast-stack`/`.toast`/`.toast--error`).
+
+### Verification summary
+`pytest tests/` — **135 passed** (up from 123 at the end of the
+previous round; two new test files, `test_stock_adjust_and_worker_crud.py`,
+12 tests). `pyflakes` — zero findings outside intentional barrel
+re-exports. `node --check` — all frontend `.js` files clean. The jsdom
+runtime harness (built last round specifically because a syntax check
+alone had missed a real bug) re-run against all 10 pages with
+realistic data — zero runtime errors. HTML `<div>` balance re-checked
+across all pages after the `animals.html` additions. Live boot test
+confirms the app starts cleanly with the new routes registered.
+
+### Explicitly not done this pass
+- **No dedicated edit forms for mortality, medication, attendance, or
+  payment records** — delete-and-recreate remains the path for fixing
+  a mistake on these simpler, day-stamped entries. A real gap in
+  convenience, not in capability; flagged consistently rather than
+  silently left out.
+- **The UI polish was scoped to the toast-notification change** — a
+  concrete, low-risk, verifiable improvement — rather than a broader
+  visual redesign, which risks the "don't touch working UI design" part
+  of the request if done without very specific direction on what to
+  change.

@@ -79,6 +79,32 @@ def list_attendance(worker_id: str) -> list[dict]:
     return _many(res)
 
 
+def get_attendance_record(worker_id: str, record_id: str) -> Optional[dict]:
+    res = (
+        supabase.table("worker_attendance").select("*")
+        .eq("id", record_id).eq("worker_id", worker_id).limit(1).execute()
+    )
+    return _one(res)
+
+
+def update_attendance_record(worker_id: str, record_id: str, fields: dict) -> Optional[dict]:
+    """If `date` is part of the update, the same UNIQUE(worker_id, date)
+    constraint record_attendance relies on applies here too — the route
+    layer (routes/worker_routes.py) catches the same 23505 the same way."""
+    fields = {**fields, "updated_at": _now()}
+    try:
+        res = supabase.table("worker_attendance").update(fields).eq("id", record_id).eq("worker_id", worker_id).execute()
+    except APIError as exc:
+        if exc.code == _UNIQUE_VIOLATION:
+            raise ValueError("duplicate_attendance") from exc
+        raise
+    return _one(res)
+
+
+def delete_attendance_record(worker_id: str, record_id: str) -> None:
+    supabase.table("worker_attendance").delete().eq("id", record_id).eq("worker_id", worker_id).execute()
+
+
 # ── Payments ─────────────────────────────────────────────────────────────
 
 def create_payment(worker_id: str, data: dict) -> dict:
@@ -93,3 +119,21 @@ def list_payments(worker_id: str) -> list[dict]:
         .eq("worker_id", worker_id).order("payment_date", desc=True).execute()
     )
     return _many(res)
+
+
+def get_payment(worker_id: str, payment_id: str) -> Optional[dict]:
+    res = (
+        supabase.table("worker_payments").select("*")
+        .eq("id", payment_id).eq("worker_id", worker_id).limit(1).execute()
+    )
+    return _one(res)
+
+
+def update_payment(worker_id: str, payment_id: str, fields: dict) -> Optional[dict]:
+    fields = {**fields, "updated_at": _now()}
+    res = supabase.table("worker_payments").update(fields).eq("id", payment_id).eq("worker_id", worker_id).execute()
+    return _one(res)
+
+
+def delete_payment(worker_id: str, payment_id: str) -> None:
+    supabase.table("worker_payments").delete().eq("id", payment_id).eq("worker_id", worker_id).execute()

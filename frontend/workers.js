@@ -246,7 +246,7 @@ document.getElementById('deleteWorkerBtn').addEventListener('click', async () =>
     closeModal('detailModal');
     await loadWorkers();
   } catch (err) {
-    alert(err.message);
+    showToast(err.message, true);
   }
 });
 
@@ -259,8 +259,22 @@ async function loadAttendance(workerId) {
         <div class="record-row">
           <div class="record-row-main" style="text-transform:capitalize">${r.status.replace('_', ' ')}</div>
           <span class="record-row-date">${fmtDate(r.date)}</span>
+          <button class="record-row-delete" title="Delete" data-delete-attendance="${r.id}">🗑️</button>
         </div>
       `).join('');
+  list.querySelectorAll('[data-delete-attendance]').forEach(btn => {
+    btn.addEventListener('click', () => deleteAttendance(btn.dataset.deleteAttendance));
+  });
+}
+
+async function deleteAttendance(recordId) {
+  if (!confirm('Delete this attendance record?')) return;
+  try {
+    await api(`/farms/${farmId}/workers/${activeWorkerId}/attendance/${recordId}`, { method: 'DELETE' });
+    await loadAttendance(activeWorkerId);
+  } catch (err) {
+    showToast(err.message, true);
+  }
 }
 
 async function loadPayments(workerId) {
@@ -272,8 +286,22 @@ async function loadPayments(workerId) {
         <div class="record-row">
           <div class="record-row-main">${money(r.amount)}</div>
           <span class="record-row-date">${fmtDate(r.payment_date)}</span>
+          <button class="record-row-delete" title="Delete" data-delete-payment="${r.id}">🗑️</button>
         </div>
       `).join('');
+  list.querySelectorAll('[data-delete-payment]').forEach(btn => {
+    btn.addEventListener('click', () => deletePayment(btn.dataset.deletePayment));
+  });
+}
+
+async function deletePayment(paymentId) {
+  if (!confirm('Delete this payment record?')) return;
+  try {
+    await api(`/farms/${farmId}/workers/${activeWorkerId}/payments/${paymentId}`, { method: 'DELETE' });
+    await loadPayments(activeWorkerId);
+  } catch (err) {
+    showToast(err.message, true);
+  }
 }
 
 document.getElementById('attendanceForm').addEventListener('submit', async (e) => {
@@ -359,6 +387,26 @@ function showLoadError(status) {
     <button class="btn btn--primary" onclick="location.reload()">Try again</button>
   `;
   main.appendChild(box);
+}
+
+// AUDIT.md — a background action failing (e.g. deleting a record) used to
+// show a plain browser alert(), which blocks the whole page until
+// dismissed and looks jarring next to the rest of the UI. A small
+// auto-dismissing toast is less disruptive for something the user can
+// just try again.
+function showToast(message, isError) {
+  let stack = document.getElementById('toastStack');
+  if (!stack) {
+    stack = document.createElement('div');
+    stack.id = 'toastStack';
+    stack.className = 'toast-stack';
+    document.body.appendChild(stack);
+  }
+  const toast = document.createElement('div');
+  toast.className = 'toast' + (isError ? ' toast--error' : '');
+  toast.textContent = message;
+  stack.appendChild(toast);
+  setTimeout(() => toast.remove(), 3500);
 }
 
 async function init() {

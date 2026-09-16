@@ -122,8 +122,14 @@ from crud.workers import (  # noqa: F401
     delete_worker,
     record_attendance,
     list_attendance,
+    get_attendance_record,
+    update_attendance_record,
+    delete_attendance_record,
     create_payment,
     list_payments,
+    get_payment,
+    update_payment,
+    delete_payment,
 )
 
 from crud.assistant import (  # noqa: F401

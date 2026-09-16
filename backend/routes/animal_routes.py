@@ -7,10 +7,11 @@ from datetime import date as _date  # alias for use in fields literally named "d
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 import crud
-from core.auth import require_farm_role
+from core.auth import require_farm_role, get_current_user
+from routes._deps import audit
 
 router = APIRouter(prefix="/farms/{farm_id}/animals", tags=["Animals"])
 
@@ -55,6 +56,25 @@ class AnimalBatchUpdate(BaseModel):
     average_weight_kg: float | None = None
     expected_selling_date: date | None = None
     notes: str | None = None
+
+
+class BatchStockAdjustment(BaseModel):
+    """A direct manual correction to a batch's live headcount — separate
+    from sales and mortality, which already adjust it correctly through
+    their own reconciled flows. This is for the cases neither of those
+    covers: a miscount at creation, a physical recount, an animal that
+    wandered back. Deliberately requires a reason — an unexplained
+    quantity jump in a farm's records is exactly the kind of thing an
+    owner reviewing history later needs context for."""
+    delta: int = Field(description="Positive to add animals, negative to remove — never zero.")
+    reason: str = Field(min_length=1, max_length=500)
+
+    @field_validator("delta")
+    @classmethod
+    def delta_not_zero(cls, v):
+        if v == 0:
+            raise ValueError("delta must not be zero — there's nothing to adjust")
+        return v
 
 
 class MortalityCreate(BaseModel):
@@ -139,6 +159,29 @@ def delete_batch(farm_id: str, batch_id: str, _member: dict = Depends(require_fa
     batch listings going forward (see crud.soft_delete_batch's docstring)."""
     _get_batch_or_404(farm_id, batch_id)
     crud.soft_delete_batch(farm_id, batch_id)
+
+
+@router.post("/batches/{batch_id}/adjust")
+def adjust_batch_stock(farm_id: str, batch_id: str, data: BatchStockAdjustment, _member: dict = Depends(require_farm_role(*_MANAGE_ROLES)), user: dict = Depends(get_current_user)):
+    """Manual stock correction — see BatchStockAdjustment's docstring for
+    why this exists alongside sales/mortality rather than just editing
+    quantity_current directly. Reuses the same atomic, race-safe
+    adjustment crud.decrement_batch_quantity already provides for
+    sale/mortality reconciliation (see crud/animals.py) — a positive
+    delta here means "add stock", which is a negative amount to that
+    function (which decrements); same inversion used by
+    routes/finance_routes.py's delete_sale."""
+    batch = _get_batch_or_404(farm_id, batch_id)
+    try:
+        updated = crud.decrement_batch_quantity(batch, -data.delta)
+    except ValueError:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This batch's stock just changed (another operation happening at the same time), "
+            "or this adjustment would take it below zero. Please refresh and try again.",
+        )
+    audit("batch_stock_adjusted", farm_id=farm_id, batch_id=batch_id, delta=data.delta, reason=data.reason, by_user=user["user_id"])
+    return updated
 
 
 @router.post("/batches/{batch_id}/mortality", status_code=status.HTTP_201_CREATED)

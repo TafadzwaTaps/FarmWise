@@ -3,6 +3,7 @@ Routes: /farms/{farm_id}/workers, .../{worker_id}, .../attendance, .../payments
 """
 
 from datetime import date
+from datetime import date as _date  # alias for fields literally named "date" that also carry a default — a bare `date: date | None = None` self-shadows; see AttendanceUpdate below and AUDIT.md
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -48,9 +49,23 @@ class AttendanceCreate(BaseModel):
     notes: str | None = None
 
 
+class AttendanceUpdate(BaseModel):
+    date: _date | None = None
+    status: AttendanceStatus | None = None
+    notes: str | None = None
+
+
 class PaymentCreate(BaseModel):
     amount: float = Field(gt=0)
     payment_date: date
+    period_start: date | None = None
+    period_end: date | None = None
+    notes: str | None = None
+
+
+class PaymentUpdate(BaseModel):
+    amount: float | None = Field(default=None, gt=0)
+    payment_date: date | None = None
     period_start: date | None = None
     period_end: date | None = None
     notes: str | None = None
@@ -129,6 +144,30 @@ def list_attendance(farm_id: str, worker_id: str, _member: dict = Depends(requir
     return crud.list_attendance(worker_id)
 
 
+@router.patch("/{worker_id}/attendance/{record_id}")
+def update_attendance(farm_id: str, worker_id: str, record_id: str, data: AttendanceUpdate, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
+    _get_worker_or_404(farm_id, worker_id)
+    if crud.get_attendance_record(worker_id, record_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Attendance record not found")
+    fields = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing to update")
+    if "date" in fields:
+        fields["date"] = fields["date"].isoformat()
+    try:
+        return crud.update_attendance_record(worker_id, record_id, fields)
+    except ValueError:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This worker already has an attendance record for that date")
+
+
+@router.delete("/{worker_id}/attendance/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_attendance(farm_id: str, worker_id: str, record_id: str, _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
+    _get_worker_or_404(farm_id, worker_id)
+    if crud.get_attendance_record(worker_id, record_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Attendance record not found")
+    crud.delete_attendance_record(worker_id, record_id)
+
+
 # ── Payments (payroll / salary history) ───────────────────────────────────
 
 @router.post("/{worker_id}/payments", status_code=status.HTTP_201_CREATED)
@@ -145,3 +184,25 @@ def create_payment(farm_id: str, worker_id: str, data: PaymentCreate, _member: d
 def list_payments(farm_id: str, worker_id: str, _member: dict = Depends(require_farm_role())):
     _get_worker_or_404(farm_id, worker_id)
     return crud.list_payments(worker_id)
+
+
+@router.patch("/{worker_id}/payments/{payment_id}")
+def update_payment(farm_id: str, worker_id: str, payment_id: str, data: PaymentUpdate, _member: dict = Depends(require_farm_role(*_MANAGE_ROLES))):
+    _get_worker_or_404(farm_id, worker_id)
+    if crud.get_payment(worker_id, payment_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Payment record not found")
+    fields = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing to update")
+    for date_field in ("payment_date", "period_start", "period_end"):
+        if date_field in fields:
+            fields[date_field] = fields[date_field].isoformat()
+    return crud.update_payment(worker_id, payment_id, fields)
+
+
+@router.delete("/{worker_id}/payments/{payment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_payment(farm_id: str, worker_id: str, payment_id: str, _member: dict = Depends(require_farm_role(*_MANAGE_ROLES))):
+    _get_worker_or_404(farm_id, worker_id)
+    if crud.get_payment(worker_id, payment_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Payment record not found")
+    crud.delete_payment(worker_id, payment_id)

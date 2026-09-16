@@ -146,6 +146,7 @@
     <div id="detailOverview" style="margin-bottom:8px;font-size:13px;color:var(--text-dim)"></div>
     <div id="detailBatchActions" style="margin-bottom:18px;display:none">
       <button type="button" class="btn btn--outline btn--sm" id="editBatchBtn">Edit batch info</button>
+      <button type="button" class="btn btn--outline btn--sm" id="adjustStockBtn">Adjust stock</button>
       <button type="button" class="btn btn--danger btn--sm" id="deleteBatchBtn">Delete batch</button>
     </div>
 
@@ -197,6 +198,36 @@
     <div class="tab-panel" id="tabProfit">
       <div id="profitContent"><p class="panel-empty">Loading…</p></div>
     </div>
+  </div>
+</div>
+
+<!-- ═══════ Adjust batch stock modal ═══════ -->
+<div class="modal-overlay" id="adjustBatchModal">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <h2>Adjust stock</h2>
+      <button class="modal-close" data-close="adjustBatchModal">✕</button>
+    </div>
+    <p style="font-size:12px;color:var(--text-dim);margin-bottom:14px">
+      For corrections that aren't a sale or a recorded death — a physical recount, a miscount at
+      creation, an animal that wandered back. Sales and mortality already keep this number accurate
+      on their own.
+    </p>
+    <div class="alert alert--error" id="adjustBatchAlert"></div>
+    <form id="adjustBatchForm">
+      <div class="field">
+        <label for="adjustBatchDelta">Change</label>
+        <input id="adjustBatchDelta" type="number" step="1" required placeholder="e.g. 5 to add, -3 to remove">
+      </div>
+      <div class="field">
+        <label for="adjustBatchReason">Reason</label>
+        <textarea id="adjustBatchReason" rows="2" required placeholder="e.g. Physical recount on 12 Jan found 5 more birds than recorded"></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn--outline" data-close="adjustBatchModal">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="adjustBatchSubmitBtn">Apply</button>
+      </div>
+    </form>
   </div>
 </div>
 
