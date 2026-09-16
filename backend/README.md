@@ -114,11 +114,14 @@ matching how WaziBot manages its schema.
 Get your Supabase URL and **service_role** key from
 Project Settings → API, and set `SUPABASE_URL` / `SUPABASE_KEY` in `.env`.
 
-Then run `farmwise_indexes_and_constraints_migration.sql` and
-`farmwise_batch_costing_migration.sql` (project root) once each in the
-SQL Editor — additive indexes/constraints, and the columns needed for
-real per-batch profit calculation, respectively. See the comment at the
-top of each file and `AUDIT.md` for what they do and why.
+Then run `farmwise_indexes_and_constraints_migration.sql`,
+`farmwise_batch_costing_migration.sql`, and `farmwise_batch_media_migration.sql`
+(project root) once each in the SQL Editor — additive indexes/constraints,
+the columns needed for real per-batch profit calculation, and the media
+columns + storage bucket setup for mortality/medication evidence
+photos/videos, respectively. See the comment at the top of each file and
+`AUDIT.md` for what they do and why — the media migration has one manual
+step (creating the `batch-media` Storage bucket) that SQL alone can't do.
 
 ### Run locally
 
@@ -214,6 +217,7 @@ POST/PATCH/DELETE /api/v1/farms/{farm_id}/members[/{member_id}]   (team manageme
 
 POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/animals/batches[/{batch_id}]   (DELETE soft-deletes — AUDIT.md FWA-033)
 POST /api/v1/farms/{farm_id}/animals/batches/{batch_id}/adjust   (manual stock correction, requires a reason)
+POST /api/v1/farms/{farm_id}/animals/media   (evidence photo/video upload for mortality/medication records — AUDIT.md)
 POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/animals/batches/{batch_id}/mortality[/{record_id}]   (quantity not editable — delete restores stock)
 POST/GET/PATCH/DELETE /api/v1/farms/{farm_id}/animals/batches/{batch_id}/medication[/{record_id}]
 GET      /api/v1/farms/{farm_id}/animals/batches/{batch_id}/profit    (added — AUDIT.md FWA-006)

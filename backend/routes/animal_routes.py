@@ -1,17 +1,17 @@
 """routes/animal_routes.py — Animal batches, mortality, medication.
-Routes: /farms/{farm_id}/animals/batches, .../mortality, .../medication
+Routes: /farms/{farm_id}/animals/batches, .../mortality, .../medication, .../media
 """
 
 from datetime import date
 from datetime import date as _date  # alias for use in fields literally named "date" that also carry a default — see MortalityUpdate below
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from pydantic import BaseModel, Field, field_validator
 
 import crud
 from core.auth import require_farm_role, get_current_user
-from routes._deps import audit
+from routes._deps import audit, log
 
 router = APIRouter(prefix="/farms/{farm_id}/animals", tags=["Animals"])
 
@@ -28,6 +28,22 @@ MedicationType = Literal["vaccine", "medicine", "deworming", "treatment"]
 
 # Kept for anything that still wants the plain set (e.g. tests, docs).
 VALID_SPECIES = set(Species.__args__)
+
+# Evidence photo/video attachments on mortality/medication records — same
+# shape and same allowlist reasoning as routes/field_report_routes.py's
+# ALLOWED_MEDIA_TYPES (an explicit allowlist, not a prefix match, since
+# "image/" would also admit "image/svg+xml" — SVG can embed <script>,
+# a stored-XSS vector if ever rendered from its public Storage URL).
+MAX_MEDIA_BYTES = 25 * 1024 * 1024  # 25 MB per file
+ALLOWED_MEDIA_TYPES = {
+    "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif",
+    "video/mp4", "video/quicktime", "video/webm",
+}
+
+
+class MediaItem(BaseModel):
+    url: str
+    type: str  # "image" | "video"
 
 
 class AnimalBatchCreate(BaseModel):
@@ -92,14 +108,16 @@ class MortalityCreate(BaseModel):
     quantity: int = Field(gt=0)
     cause: str | None = None
     notes: str | None = None
+    media: list[MediaItem] = Field(default_factory=list)
 
 
 class MortalityUpdate(BaseModel):
     """quantity isn't editable here — see crud.update_mortality_record's
-    docstring. date/cause/notes are safe to fix without touching stock."""
+    docstring. date/cause/notes/media are safe to fix without touching stock."""
     date: _date | None = None
     cause: str | None = None
     notes: str | None = None
+    media: list[MediaItem] | None = None
 
 
 class MedicationCreate(BaseModel):
@@ -111,6 +129,7 @@ class MedicationCreate(BaseModel):
     administered_by: str | None = None
     cost: float | None = Field(default=None, ge=0)
     notes: str | None = None
+    media: list[MediaItem] = Field(default_factory=list)
 
 
 class MedicationUpdate(BaseModel):
@@ -122,6 +141,7 @@ class MedicationUpdate(BaseModel):
     administered_by: str | None = None
     cost: float | None = Field(default=None, ge=0)
     notes: str | None = None
+    media: list[MediaItem] | None = None
 
 
 def _get_batch_or_404(farm_id: str, batch_id: str) -> dict:
@@ -129,6 +149,35 @@ def _get_batch_or_404(farm_id: str, batch_id: str) -> dict:
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Animal batch not found")
     return batch
+
+
+@router.post("/media")
+async def upload_media(farm_id: str, file: UploadFile = File(...), _member: dict = Depends(require_farm_role(*_RECORD_ROLES))):
+    """Uploads one evidence photo/video for a mortality or medication
+    record and returns {"url": ..., "type": "image"|"video"} — the
+    frontend collects these into a `media` list and includes it when
+    creating/updating the actual record, same two-step flow already used
+    for field reports (upload first, attach the result)."""
+    if not file.content_type or file.content_type.lower() not in ALLOWED_MEDIA_TYPES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Only JPEG, PNG, WEBP, HEIC images or MP4/MOV/WEBM videos are allowed",
+        )
+
+    file_bytes = await file.read()
+    if len(file_bytes) > MAX_MEDIA_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "File too large (max 25 MB)")
+    if not file_bytes:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty file")
+
+    try:
+        return crud.upload_batch_media(farm_id, file_bytes, file.filename or "upload", file.content_type)
+    except Exception as exc:
+        log.error("animal_media_upload_failed farm_id=%s error=%s", farm_id, exc)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Could not upload media right now — make sure the 'batch-media' storage bucket exists in Supabase.",
+        )
 
 
 @router.post("/batches", status_code=status.HTTP_201_CREATED)

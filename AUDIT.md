@@ -2129,3 +2129,95 @@ registered (route count unchanged from the previous round — this pass
 restructured existing endpoints' behavior and added no new routes,
 only changed what one existing route, `PATCH .../batches/{batch_id}`,
 accepts).
+
+---
+
+# Post-Phase-9, continued — Evidence photo/video attachments on mortality & medication records
+
+Closes the one item explicitly deferred in the previous round: mobile's
+Mortality/Medication forms show Photo/Video/Library buttons that had no
+backend support at all (no `media` column existed on either table, and
+no upload endpoint or storage bucket existed for this feature area).
+Built end-to-end: schema, storage, backend, and frontend.
+
+### Schema + storage
+**New migration:** `farmwise_batch_media_migration.sql` — adds a
+`media jsonb not null default '[]'::jsonb` column to both
+`mortality_records` and `medication_records`, the same array shape
+(`[{"url": ..., "type": "image"|"video"}, ...]`) `field_reports.media`
+already uses from an earlier round, for consistency.
+
+**New Supabase Storage bucket: `batch-media`** — deliberately separate
+from the existing `field-reports` bucket rather than reusing it. This is
+a different feature domain (animal batch records vs. worker field
+reports), and keeping storage organized by domain matches how the rest
+of the codebase is structured (one crud/routes module per domain).
+Bucket creation itself can't be done via SQL — the migration file
+documents the one manual step (Supabase Dashboard → Storage → New
+bucket → `batch-media`, public), following the exact same pattern an
+earlier round already established for the `field-reports` bucket, not
+inventing a new process.
+
+### Backend
+- `crud.animals.upload_media()` (exported as `crud.upload_batch_media`
+  to avoid colliding with `field_reports`' own `upload_media` in the
+  shared `crud` namespace) — mirrors `field_reports.upload_media`
+  exactly: the storage extension is derived from the validated
+  content-type via a fixed map, never from the client-supplied
+  filename (which could inject path segments into the storage key).
+- `POST /farms/{farm_id}/animals/media` — same explicit MIME allowlist
+  as the field-reports upload endpoint (JPEG/PNG/WEBP/HEIC images,
+  MP4/MOV/WEBM videos) and the same reasoning for why it's an allowlist
+  and not a prefix match: `"image/"` would also admit
+  `"image/svg+xml"`, and SVG can embed `<script>` — a stored-XSS vector
+  if ever opened directly from its public Storage URL. Same 25 MB cap,
+  same graceful `503` (not an opaque `500`) if the bucket doesn't exist
+  yet. Restricted to `_RECORD_ROLES` — the same roles already allowed
+  to log mortality/medication in the first place.
+- `media: list[MediaItem]` added to `MortalityCreate`/`MedicationCreate`
+  (defaults to `[]`) and `MortalityUpdate`/`MedicationUpdate` (defaults
+  to `None`, meaning "don't touch existing attachments" — confirmed
+  with a dedicated test that omitting the field entirely on an update
+  never wipes what's already there).
+
+**Verification:** `tests/test_batch_media.py` — 13 new tests covering
+the upload endpoint (accepts real image/video types, rejects the SVG
+XSS vector, rejects oversized/empty files, the graceful 503 on a
+missing bucket, role restriction) and that `media` actually flows
+through correctly into create and update payloads for both record
+types, including the "omitted means unchanged, not wiped" case.
+**151 tests passing** overall.
+
+### Frontend
+Media-picker UI added to both the Mortality and Medication forms inside
+the batch detail modal's respective tabs — reusing the exact CSS
+(`.media-picker`, `.media-thumb`, `.media-add-btn`) already proven in
+`field-reports.js` from an earlier round, so the upload interaction
+looks and behaves identically to the one place in the app that already
+had it. Since both forms live in the same modal and need independent
+attachment state, wrote a small reusable `createMediaController(prefix)`
+factory rather than duplicating the picker logic twice or risking one
+global state variable being shared between two unrelated forms.
+
+Wired into every relevant point: resetting either form clears its own
+picker; opening a record for edit pre-loads its existing attachments as
+thumbnails; submitting either form (create or edit) includes the
+current attachment list; and submission is blocked with a clear message
+if a file is still mid-upload when Save/Record is clicked, matching the
+same guard `field-reports.js` already has. Record rows in both lists
+now show a small "📎 N attachments" indicator when a record has any,
+same pattern as the field-reports list.
+
+**Verification — went further than a page-load check this time:**
+scripted a full interaction in the jsdom harness — opened a batch with
+existing mortality and medication records that already have attached
+media, confirmed the attachment-count indicator renders correctly,
+clicked a mortality record's Edit link and confirmed its 2 existing
+attachments pre-load as thumbnails, simulated selecting a new file
+through the actual `<input type="file">` element and confirmed it
+uploads and appends a third thumbnail, then switched to the Medication
+tab and confirmed its independent 1-attachment record renders
+correctly with no cross-contamination between the two forms' picker
+state. Zero runtime errors. Also re-ran the full 10-page harness and a
+live boot test (109 routes now registered, up from 108 — the one new
+upload endpoint).

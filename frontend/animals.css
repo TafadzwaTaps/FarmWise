@@ -127,6 +127,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);}
 .record-row-main{font-weight:600;}
 .record-row-sub{color:var(--text-dim);font-size:11px;margin-top:2px;}
 .record-row-date{font-family:var(--mono);color:var(--sky);white-space:nowrap;}
+.record-media-count{display:block;font-size:11px;color:var(--text-dim);margin-top:2px;}
 .record-row-delete{background:none;border:none;cursor:pointer;font-size:12px;padding:4px 6px;
   border-radius:6px;opacity:.5;margin-left:8px;flex-shrink:0;}
 .record-row-delete:hover{opacity:1;background:var(--surface2);}
@@ -160,3 +161,16 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);}
   max-width:360px;text-align:center;animation:toast-in .2s ease-out;}
 .toast--error{border-color:var(--red);color:var(--red);}
 @keyframes toast-in{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+
+/* ── Media (photo/video attach + thumbnails) — matches field-reports.css ── */
+.media-picker{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px;}
+.media-thumb{position:relative;width:72px;height:72px;border-radius:8px;overflow:hidden;
+  border:1.5px solid var(--border);background:var(--surface2);}
+.media-thumb img,.media-thumb video{width:100%;height:100%;object-fit:cover;}
+.media-thumb-remove{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;
+  border:none;border-radius:999px;width:18px;height:18px;font-size:11px;line-height:1;cursor:pointer;}
+.media-add-btn{width:72px;height:72px;border-radius:8px;border:1.5px dashed var(--border);
+  background:var(--surface2);color:var(--text-dim);font-size:22px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;}
+.media-add-btn:hover{border-color:var(--green);color:var(--green);}
+.media-hint{font-size:11px;color:var(--text-dim);margin-bottom:14px;}

@@ -162,6 +162,14 @@
           <div class="field"><label for="mQuantity">Quantity</label><input id="mQuantity" type="number" min="1" required></div>
         </div>
         <div class="field"><label for="mCause">Cause <span style="font-weight:400">(optional)</span></label><input id="mCause"></div>
+        <div class="field">
+          <label>Evidence photos/videos <span style="font-weight:400">(optional)</span></label>
+          <div class="media-picker" id="mMediaPicker">
+            <button type="button" class="media-add-btn" id="mMediaAddBtn">+</button>
+          </div>
+          <div class="media-hint">JPEG, PNG, WEBP, HEIC, MP4, MOV, or WEBM — up to 25 MB each, 10 files max.</div>
+          <input type="file" id="mMediaInput" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/quicktime,video/webm" style="display:none"/>
+        </div>
         <div class="form-actions">
           <button type="button" class="btn btn--outline btn--sm" id="mortalityCancelEditBtn" style="display:none">Cancel</button>
           <button type="submit" class="btn btn--primary btn--sm" id="mortalitySubmitBtn">Record</button>
@@ -195,6 +203,14 @@
         </div>
         <div class="field"><label for="medCost">Cost <span style="font-weight:400">(optional — improves the batch's Profit tab accuracy)</span></label><input id="medCost" type="number" step="0.01" min="0"></div>
         <div class="field"><label for="medNotes">Notes <span style="font-weight:400">(optional)</span></label><textarea id="medNotes" rows="2"></textarea></div>
+        <div class="field">
+          <label>Evidence photos/videos <span style="font-weight:400">(optional)</span></label>
+          <div class="media-picker" id="medMediaPicker">
+            <button type="button" class="media-add-btn" id="medMediaAddBtn">+</button>
+          </div>
+          <div class="media-hint">JPEG, PNG, WEBP, HEIC, MP4, MOV, or WEBM — up to 25 MB each, 10 files max.</div>
+          <input type="file" id="medMediaInput" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/quicktime,video/webm" style="display:none"/>
+        </div>
         <div class="form-actions">
           <button type="button" class="btn btn--outline btn--sm" id="medicationCancelEditBtn" style="display:none">Cancel</button>
           <button type="submit" class="btn btn--primary btn--sm" id="medicationSubmitBtn">Log</button>

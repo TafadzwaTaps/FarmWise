@@ -2,10 +2,41 @@
 
 from __future__ import annotations
 
+import uuid as _uuid
 from typing import Optional
 
 from core.db import supabase
 from crud._helpers import _now, _new_id, _one, _many
+
+MEDIA_BUCKET = "batch-media"  # separate from field_reports' "field-reports" bucket — see farmwise_batch_media_migration.sql
+
+
+def upload_media(farm_id: str, file_bytes: bytes, filename: str, content_type: str) -> dict:
+    """Uploads one photo/video to Supabase Storage and returns
+    {"url": public_url, "type": "image"|"video"} ready to append to a
+    mortality or medication record's `media` list.
+
+    Mirrors crud/field_reports.py's upload_media exactly — same
+    content-type-derived extension (never the client-supplied filename,
+    which could inject path segments — see that function's docstring for
+    the full reasoning), same allowlist validated one layer up in
+    routes/animal_routes.py before this is ever called.
+    """
+    _EXT_BY_CONTENT_TYPE = {
+        "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+        "image/heic": "heic", "image/heif": "heif",
+        "video/mp4": "mp4", "video/quicktime": "mov", "video/webm": "webm",
+    }
+    ext = _EXT_BY_CONTENT_TYPE.get(content_type, "bin")
+    storage_path = f"{farm_id}/{_uuid.uuid4()}.{ext}"
+
+    supabase.storage.from_(MEDIA_BUCKET).upload(
+        storage_path, file_bytes, {"content-type": content_type}
+    )
+    public_url = supabase.storage.from_(MEDIA_BUCKET).get_public_url(storage_path)
+
+    media_type = "video" if content_type.startswith("video/") else "image"
+    return {"url": public_url, "type": media_type}
 
 
 # ── Batches ──────────────────────────────────────────────────────────────

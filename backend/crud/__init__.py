@@ -70,6 +70,7 @@ from crud.animals import (  # noqa: F401
     update_medication_record,
     delete_medication_record,
     list_medication_records,
+    upload_media as upload_batch_media,
 )
 
 from crud.finance import (  # noqa: F401

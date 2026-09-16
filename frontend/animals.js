@@ -67,6 +67,79 @@ async function api(path, { method = 'GET', body } = {}) {
   return data;
 }
 
+// Multipart upload doesn't set Content-Type itself — the browser adds the
+// correct multipart boundary automatically when the body is a FormData,
+// and setting it manually breaks that. Same helper shape as
+// field-reports.js/assistant.js's apiUpload — kept per-file rather than
+// shared since there's no shared JS module across pages.
+async function apiUpload(path, formData) {
+  const res = await fetch(API + path, { method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: formData });
+  let data = null; try { data = await res.json(); } catch (e) {}
+  if (!res.ok) {
+    const err = new Error((data && (data.error?.message || data.detail)) || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+// Reusable evidence-photo/video picker for the batch detail modal's
+// Mortality and Medication forms — two independent instances (prefix 'm'
+// and 'med') rather than a single global state, since both forms live in
+// the same modal and can each have their own pending attachments.
+function createMediaController(prefix) {
+  const pickerEl = document.getElementById(`${prefix}MediaPicker`);
+  const addBtn = document.getElementById(`${prefix}MediaAddBtn`);
+  const inputEl = document.getElementById(`${prefix}MediaInput`);
+  let pending = [];
+  let uploading = false;
+
+  function render() {
+    pickerEl.querySelectorAll('.media-thumb').forEach(el => el.remove());
+    pending.forEach((m, idx) => {
+      const thumb = document.createElement('div');
+      thumb.className = 'media-thumb';
+      thumb.innerHTML = m.type === 'image' ? `<img src="${m.url}" alt="Attachment"/>` : `<video src="${m.url}"></video>`;
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'media-thumb-remove';
+      removeBtn.type = 'button';
+      removeBtn.textContent = '✕';
+      removeBtn.addEventListener('click', () => { pending.splice(idx, 1); render(); });
+      thumb.appendChild(removeBtn);
+      pickerEl.insertBefore(thumb, addBtn);
+    });
+    addBtn.disabled = uploading || pending.length >= 10;
+    addBtn.textContent = uploading ? '…' : '+';
+  }
+
+  addBtn.addEventListener('click', () => inputEl.click());
+  inputEl.addEventListener('change', async () => {
+    const file = inputEl.files[0];
+    inputEl.value = '';
+    if (!file) return;
+    uploading = true;
+    render();
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const result = await apiUpload(`/farms/${farmId}/animals/media`, formData);
+      pending.push(result);
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      uploading = false;
+      render();
+    }
+  });
+
+  return {
+    reset() { pending = []; render(); },
+    setMedia(list) { pending = list ? [...list] : []; render(); },
+    getMedia() { return pending; },
+    isUploading() { return uploading; },
+  };
+}
+
 // Farm-wide currency setting (AUDIT.md — money() previously hardcoded '$'
 // regardless of what a farmer set in Settings; every currency figure on
 // this page showed the wrong symbol for any non-USD farm). Set in init()
@@ -346,6 +419,8 @@ let editingMortalityId = null;
 let editingMedicationId = null;
 let mortalityCache = [];
 let medicationCache = [];
+const mortalityMedia = createMediaController('m');
+const medicationMedia = createMediaController('med');
 
 function resetMortalityForm() {
   editingMortalityId = null;
@@ -356,6 +431,7 @@ function resetMortalityForm() {
   document.getElementById('mDate').value = new Date().toISOString().slice(0, 10);
   document.getElementById('mQuantity').value = '';
   document.getElementById('mCause').value = '';
+  mortalityMedia.reset();
 }
 
 function resetMedicationForm() {
@@ -372,6 +448,7 @@ function resetMedicationForm() {
   document.getElementById('medAdministeredBy').value = '';
   document.getElementById('medCost').value = '';
   document.getElementById('medNotes').value = '';
+  medicationMedia.reset();
 }
 
 async function loadMortality(batchId) {
@@ -384,6 +461,7 @@ async function loadMortality(batchId) {
           <div>
             <div class="record-row-main">${r.quantity} lost${r.cause ? ' — ' + escapeHtml(r.cause) : ''}</div>
             <span class="record-row-date">${fmtDate(r.date)}</span>
+            ${r.media && r.media.length ? `<span class="record-media-count">📎 ${r.media.length} attachment${r.media.length === 1 ? '' : 's'}</span>` : ''}
           </div>
           <div class="record-row-actions">
             <button class="record-row-link record-row-link--edit" data-edit-mortality="${r.id}">Edit</button>
@@ -411,6 +489,7 @@ function openEditMortality(recordId) {
   document.getElementById('mQuantity').closest('.field').style.display = 'none';
   document.getElementById('mDate').value = r.date;
   document.getElementById('mCause').value = r.cause || '';
+  mortalityMedia.setMedia(r.media);
   document.getElementById('mortalityAlert').classList.remove('show');
 }
 
@@ -442,6 +521,7 @@ async function loadMedication(batchId) {
             <div class="record-row-main">${escapeHtml(r.name)}${r.cost != null ? ' · ' + money(r.cost) : ''}</div>
             <div class="record-row-sub">${r.type}${r.next_due_date ? ' · next due ' + fmtDate(r.next_due_date) : ''}</div>
             <span class="record-row-date">${fmtDate(r.date_administered)}</span>
+            ${r.media && r.media.length ? `<span class="record-media-count">📎 ${r.media.length} attachment${r.media.length === 1 ? '' : 's'}</span>` : ''}
           </div>
           <div class="record-row-actions">
             <button class="record-row-link record-row-link--edit" data-edit-medication="${r.id}">Edit</button>
@@ -472,6 +552,7 @@ function openEditMedication(recordId) {
   document.getElementById('medAdministeredBy').value = r.administered_by || '';
   document.getElementById('medCost').value = r.cost ?? '';
   document.getElementById('medNotes').value = r.notes || '';
+  medicationMedia.setMedia(r.media);
   document.getElementById('medicationAlert').classList.remove('show');
 }
 
@@ -492,6 +573,11 @@ document.getElementById('mortalityForm').addEventListener('submit', async (e) =>
   e.preventDefault();
   const alertBox = document.getElementById('mortalityAlert');
   alertBox.classList.remove('show');
+  if (mortalityMedia.isUploading()) {
+    alertBox.textContent = 'Please wait for the attachment to finish uploading.';
+    alertBox.classList.add('show');
+    return;
+  }
   try {
     if (editingMortalityId) {
       await api(`/farms/${farmId}/animals/batches/${activeBatchId}/mortality/${editingMortalityId}`, {
@@ -499,6 +585,7 @@ document.getElementById('mortalityForm').addEventListener('submit', async (e) =>
         body: {
           date: document.getElementById('mDate').value,
           cause: document.getElementById('mCause').value.trim() || null,
+          media: mortalityMedia.getMedia(),
         },
       });
       resetMortalityForm();
@@ -511,6 +598,7 @@ document.getElementById('mortalityForm').addEventListener('submit', async (e) =>
         date: document.getElementById('mDate').value,
         quantity: Number(document.getElementById('mQuantity').value),
         cause: document.getElementById('mCause').value.trim() || null,
+        media: mortalityMedia.getMedia(),
       },
     });
     resetMortalityForm();
@@ -528,6 +616,11 @@ document.getElementById('medicationForm').addEventListener('submit', async (e) =
   e.preventDefault();
   const alertBox = document.getElementById('medicationAlert');
   alertBox.classList.remove('show');
+  if (medicationMedia.isUploading()) {
+    alertBox.textContent = 'Please wait for the attachment to finish uploading.';
+    alertBox.classList.add('show');
+    return;
+  }
   const body = {
     type: document.getElementById('medType').value,
     name: document.getElementById('medName').value.trim(),
@@ -537,6 +630,7 @@ document.getElementById('medicationForm').addEventListener('submit', async (e) =
     administered_by: document.getElementById('medAdministeredBy').value.trim() || null,
     cost: document.getElementById('medCost').value ? Number(document.getElementById('medCost').value) : null,
     notes: document.getElementById('medNotes').value.trim() || null,
+    media: medicationMedia.getMedia(),
   };
   try {
     if (editingMedicationId) {
