@@ -2221,3 +2221,59 @@ correctly with no cross-contamination between the two forms' picker
 state. Zero runtime errors. Also re-ran the full 10-page harness and a
 live boot test (109 routes now registered, up from 108 — the one new
 upload endpoint).
+
+---
+
+# Post-Phase-9, continued — Resend email fallback for an unverified sending domain
+
+Diagnosed from real production logs the user shared, showing every
+password-reset email failing with Resend's `403 domain is not verified`
+error.
+
+### Diagnosis
+**Not a code bug** — `EMAIL_FROM` in the live environment is set to a
+custom `@farmwiseai.app` address, and that domain has never been
+verified with DNS records in the Resend dashboard
+(resend.com/domains). Confirmed the code was already behaving
+correctly otherwise: `_send_email`'s failure handling is non-fatal by
+design (the caller always returns a generic response regardless of
+whether the email actually sent, so a broken provider can never break
+the password-reset flow or leak whether an account exists — this
+already showed in the shared logs as a clean `204` even while the
+email silently failed). The gap was that a misconfigured custom sender
+domain meant **zero** password-reset/OTP emails could ever be
+delivered until DNS was fixed, with no automatic recovery.
+
+### Fix — automatic fallback to the zero-setup default sender
+**Status:** FIXED
+
+`_send_email` already had a safe default sender
+(`onboarding@resend.dev`, which needs no domain verification at all)
+— it just wasn't used once `EMAIL_FROM` was explicitly set to
+something else. Added a one-time retry: if a send fails with exactly
+`403` + a response body containing "domain is not verified", and the
+sender wasn't already the default, retry once with
+`onboarding@resend.dev` instead. This means real users can still
+receive their password-reset email (from a less-branded address) while
+DNS verification gets sorted out separately, instead of being locked
+out of the flow entirely.
+
+**Deliberately narrow trigger condition** — this does **not** retry on
+every `403`. A bad API key is also a `403` from Resend, and retrying
+that with a different "from" address wouldn't fix anything; it only
+retries when the response body specifically confirms the "domain not
+verified" failure mode, so a different underlying problem doesn't get
+masked by a fallback that can't actually help.
+
+**Verification:** `tests/test_notification_service.py` — 8 new tests,
+including the two that matter most for a retry mechanism: the fallback
+itself failing does **not** trigger a second retry (exactly 2 attempts
+total, not an infinite loop), and an unrelated 403 (bad API key) never
+triggers the fallback path at all. **159 tests passing** overall.
+
+### What the user still needs to do
+The retry is a safety net, not a substitute for the real fix — verify
+`farmwiseai.app` at **resend.com/domains** (add the SPF/DKIM DNS
+records Resend's dashboard provides at your domain registrar) so
+emails reliably send from the branded address instead of falling back
+to Resend's generic testing sender.

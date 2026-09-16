@@ -49,8 +49,14 @@ def _send_email(email: str, subject: str, body: str) -> None:
         )
         return
 
-    sender = os.getenv("EMAIL_FROM", "FarmWise AI <onboarding@resend.dev>")
+    default_sender = "FarmWise AI <onboarding@resend.dev>"
+    sender = os.getenv("EMAIL_FROM", "").strip() or default_sender
 
+    _dispatch_email(email, subject, body, sender, api_key)
+
+
+def _dispatch_email(email: str, subject: str, body: str, sender: str, api_key: str, *, _is_fallback_attempt: bool = False) -> None:
+    default_sender = "FarmWise AI <onboarding@resend.dev>"
     try:
         res = httpx.post(
             RESEND_API_URL,
@@ -59,15 +65,35 @@ def _send_email(email: str, subject: str, body: str) -> None:
             timeout=15.0,
         )
         res.raise_for_status()
-        log.info("email_dispatch_sent email=%s subject=%s", email, subject)
+        log.info("email_dispatch_sent email=%s subject=%s sender=%s%s", email, subject, sender,
+                  " (fallback sender — see previous log line)" if _is_fallback_attempt else "")
     except httpx.HTTPStatusError as exc:
-        # Never let a broken email provider break the request that
-        # triggered it — the caller already gives a generic response
-        # regardless, so a delivery failure here should be loud in logs,
-        # not in the response.
+        body_text = exc.response.text[:300]
         log.error(
             "email_dispatch_failed email=%s status=%s body=%s",
-            email, exc.response.status_code, exc.response.text[:300],
+            email, exc.response.status_code, body_text,
         )
+        # A custom EMAIL_FROM domain that isn't (yet) verified in Resend's
+        # dashboard fails every single send with a 403 until DNS records
+        # are added there — silently losing every password-reset/OTP email
+        # in the meantime. Retry once with Resend's zero-setup testing
+        # address, which needs no domain verification at all, so delivery
+        # still succeeds (just from a less-branded sender) while the real
+        # fix (verifying the domain at resend.com/domains) gets sorted out
+        # separately. Only retries for exactly this failure mode — not
+        # blindly on any 403 (e.g. a bad API key is also a 403, and
+        # retrying with a different "from" address wouldn't fix that).
+        if (
+            not _is_fallback_attempt
+            and sender != default_sender
+            and exc.response.status_code == 403
+            and "domain is not verified" in body_text.lower()
+        ):
+            log.warning(
+                "email_dispatch_retrying_with_fallback_sender email=%s original_sender=%s — "
+                "verify your domain at https://resend.com/domains to stop needing this fallback",
+                email, sender,
+            )
+            _dispatch_email(email, subject, body, default_sender, api_key, _is_fallback_attempt=True)
     except httpx.HTTPError as exc:
         log.error("email_dispatch_network_error email=%s error=%s", email, exc)
